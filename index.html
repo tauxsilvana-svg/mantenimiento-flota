@@ -73,7 +73,13 @@ dialog::backdrop{background:#0006}
 /* ============ Datos ============ */
 const KEY = "mantenimiento_flota_v1";
 const ITEMS = ["Luces (delanteras/traseras/giro)","Frenos","Neumáticos (estado y presión)","Nivel de aceite motor","Nivel de refrigerante","Líquido de frenos","Batería","Dirección / suspensión","Correas y mangueras","Pérdidas de fluidos","Limpiaparabrisas / espejos","Bocina / alarma de retroceso","Extintor y botiquín","Documentación / VTV / seguro","Carrocería / cabina","Limpieza general"];
-const DEF_CFG = {kmAviso:500, diasAviso:15, otDias:7, checkDias:7, novDias:3};
+const DEF_PLAN=[
+  {id:"p5",km:5000,t:"Cambio de aceite y revisión general"},
+  {id:"p10",km:10000,t:"Frenos y neumáticos"},
+  {id:"p20",km:20000,t:"Batería y filtros"},
+  {id:"p50",km:50000,t:"Sistema de refrigeración"},
+  {id:"p100",km:100000,t:"Correa de distribución"}];
+const DEF_CFG = {kmAviso:500, diasPrevio:30, otDias:7, checkDias:7, novDias:3, plan:DEF_PLAN};
 
 function hash(s){let h=5381;for(const c of s)h=((h<<5)+h+c.charCodeAt(0))|0;return String(h)}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
@@ -93,72 +99,159 @@ function seed(){
     users:[
       {user:"jefe",name:"Jefe de Taller",role:"jefe",pin:hash("1234"),obra:""},
       {user:"mecanico",name:"Mecánico 1",role:"mecanico",pin:hash("1234"),obra:""},
+      {user:"administrativo",name:"Administrativo",role:"administrativo",pin:hash("1234"),obra:""},
       {user:"obra",name:"Encargado Obra Norte",role:"obra",pin:hash("1234"),obra:"Obra Norte"}
     ],
     vehicles:[
-      {id:uid(),code:"M-01",plate:"AB123CD",desc:"Camioneta Toyota Hilux",obra:"Obra Norte",km:48200,svcKm:10000,svcDias:180,lastSvcKm:40500,lastSvcFecha:addDays(t,-120),activo:true},
-      {id:uid(),code:"M-02",plate:"AC456EF",desc:"Camión Mercedes 1720",obra:"Obra Norte",km:122900,svcKm:15000,svcDias:180,lastSvcKm:108000,lastSvcFecha:addDays(t,-60),activo:true},
-      {id:uid(),code:"M-03",plate:"AD789GH",desc:"Retroexcavadora CAT 416",obra:"Obra Sur",km:6100,svcKm:5000,svcDias:120,lastSvcKm:1200,lastSvcFecha:addDays(t,-125),activo:true}
+      {id:uid(),code:"M-01",plate:"AB123CD",desc:"Camioneta Toyota Hilux",obra:"Obra Norte",km:48200,kmDia:60,done:{p5:45000,p10:40000,p20:40000,p50:0,p100:0},activo:true},
+      {id:uid(),code:"M-02",plate:"AC456EF",desc:"Camión Mercedes 1720",obra:"Obra Norte",km:122900,kmDia:80,done:{p5:120000,p10:120000,p20:100000,p50:100000,p100:100000},activo:true},
+      {id:uid(),code:"M-03",plate:"AD789GH",desc:"Retroexcavadora CAT 416",obra:"Obra Sur",km:6100,kmDia:40,done:{p5:0,p10:0,p20:0,p50:0,p100:0},activo:true}
     ],
     ots:[],checklists:[],novedades:[],log:[]
   };
 }
 let S;
-function load(){try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){S=null}if(!S){S=seed();save()}S.cfg={...DEF_CFG,...S.cfg}}
-function save(){localStorage.setItem(KEY,JSON.stringify(S))}
-function logEv(accion,detalle,vehId,otId){S.log.unshift({t:nowStr(),user:me.user,rol:me.role,accion,detalle,vehId:vehId||null,otId:otId||null});save()}
+function cloud(){return !!window.FB}
+function load(){
+  if(cloud()){S={cfg:{...DEF_CFG},seq:1,users:[],vehicles:[],ots:[],checklists:[],novedades:[],log:[]};return}
+  try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){S=null}if(!S){S=seed();save()}S.cfg={...DEF_CFG,...S.cfg}}
+function save(){if(cloud())syncOut();else localStorage.setItem(KEY,JSON.stringify(S))}
+function logEv(accion,detalle,vehId,otId){S.log.unshift({id:uid(),t:nowStr(),user:me.user,rol:me.role,accion,detalle,vehId:vehId||null,otId:otId||null});save()}
+
+/* ============ Nube (Firebase) ============ */
+const NOMAIL="@flota.app", COLS=["users","vehicles","ots","checklists","novedades","log"];
+const keyf=c=>c==="users"?"user":"id";
+let shadow={},cfgShadow="",unsubs=[],listening=false,ready=false;
+function fail(e){alert("No se pudo guardar en la nube: "+(e&&e.message||e))}
+function sortCol(c,a){
+  if(c==="vehicles")a.sort((x,y)=>x.code.localeCompare(y.code));
+  else if(c==="users")a.sort((x,y)=>x.user.localeCompare(y.user));
+  else if(c==="log")a.sort((x,y)=>y.t.localeCompare(x.t));
+}
+function afterSnap(){
+  if(!ready||!me)return;
+  const m=S.users.find(u=>u.user===me.user);
+  if(!m){FB.AU.signOut(FB.auth);return}
+  me=m;
+  if(!document.getElementById("dlg").open)render();
+}
+function startListeners(){
+  const {F,db}=FB,ps=[];
+  COLS.forEach(c=>{
+    let q=F.collection(db,c);if(c==="log")q=F.query(q,F.orderBy("t","desc"),F.limit(300));
+    ps.push(new Promise(res=>{unsubs.push(F.onSnapshot(q,snap=>{
+      const arr=[];shadow[c]={};
+      snap.forEach(d=>{const o=d.data();arr.push(o);shadow[c][String(o[keyf(c)])]=JSON.stringify(o)});
+      sortCol(c,arr);S[c]=arr;res();afterSnap();
+    },err=>{console.error(c,err);res()}))}));
+  });
+  ps.push(new Promise(res=>{unsubs.push(F.onSnapshot(F.doc(db,"config","main"),d=>{
+    const x=d.exists()?d.data():{};S.cfg={...DEF_CFG,...(x.cfg||{})};S.seq=x.seq||1;cfgShadow=JSON.stringify(S.cfg);res();afterSnap();
+  },err=>{console.error(err);res()}))}));
+  return Promise.all(ps);
+}
+function stopListeners(){unsubs.forEach(u=>u());unsubs=[];listening=false;ready=false;shadow={};cfgShadow=""}
+function syncOut(){
+  const {F,db}=FB;
+  COLS.forEach(c=>{
+    const sh=shadow[c]||(shadow[c]={}),seen=new Set();
+    S[c].forEach(o=>{const k=String(o[keyf(c)]);seen.add(k);const j=JSON.stringify(o);
+      if(sh[k]!==j){sh[k]=j;F.setDoc(F.doc(db,c,k),JSON.parse(j)).catch(fail)}});
+    if(c!=="log")Object.keys(sh).forEach(k=>{if(!seen.has(k)){delete sh[k];F.deleteDoc(F.doc(db,c,k)).catch(fail)}});
+  });
+  const cj=JSON.stringify(S.cfg);
+  if(cj!==cfgShadow){cfgShadow=cj;F.setDoc(F.doc(db,"config","main"),{cfg:JSON.parse(cj)},{merge:true}).catch(fail)}
+}
+function nextSeq(){
+  const {F,db}=FB,ref=F.doc(db,"config","main");
+  return F.runTransaction(db,async tx=>{const r=await tx.get(ref);const n=(r.exists()&&r.data().seq)||1;tx.set(ref,{seq:n+1},{merge:true});return n});
+}
 
 /* ============ Sesión ============ */
 let me=null, view="";
 const NAV={
   jefe:[["panel","Panel"],["alertas","Alertas"],["ots","Órdenes de trabajo"],["novedades","Novedades"],["checklists","Checklists"],["mo","Mano de obra"],["vehiculos","Móviles"],["stats","Estadísticas"],["traza","Trazabilidad"],["admin","Administración"]],
   mecanico:[["panel","Panel"],["alertas","Alertas"],["ots","Órdenes de trabajo"],["mo","Mano de obra"],["vehiculos","Móviles"]],
+  administrativo:[["panel","Panel"],["alertas","Alertas"],["ots","Órdenes de trabajo"],["vehiculos","Móviles"],["stats","Estadísticas"]],
   obra:[["checklists","Checklists"],["alertas","Alertas"],["vehiculos","Móviles"]]
 };
-const ROLE_NAME={jefe:"Jefe de Taller",mecanico:"Mecánico",obra:"Obra"};
+const ROLE_NAME={jefe:"Jefe de Taller",mecanico:"Mecánico",obra:"Obra",administrativo:"Administrativo"};
 function veh(id){return S.vehicles.find(v=>v.id===id)}
 function vname(id){const v=veh(id);return v?`${v.code} · ${v.plate}`:"?"}
 function myVehicles(){return S.vehicles.filter(v=>v.activo&&(me.role!=="obra"||!me.obra||v.obra===me.obra))}
 
 function boot(){
   load();
+  if(cloud()){
+    FB.AU.onAuthStateChanged(FB.auth,async fu=>{
+      if(!fu){stopListeners();me=null;loginView();return}
+      document.getElementById("app").innerHTML='<div class="login card"><p class="mut">Cargando datos…</p></div>';
+      if(!listening){listening=true;await startListeners()}
+      const un=fu.email.split("@")[0];
+      let boot1=false;
+      if(!S.users.length){S.users.push({user:un,name:un.charAt(0).toUpperCase()+un.slice(1),role:"jefe",obra:""});boot1=true}
+      me=S.users.find(u=>u.user===un);
+      if(!me){await FB.AU.signOut(FB.auth);loginView("Tu usuario no tiene acceso. Pedile al jefe de taller que te dé de alta.");return}
+      if(boot1)save();
+      ready=true;view=NAV[me.role][0][0];logEv("Ingreso","Inicio de sesión");render();
+    });
+    return;
+  }
   const u=sessionStorage.getItem("sess");
   me=u?S.users.find(x=>x.user===u):null;
   if(me){view=NAV[me.role][0][0];render()}else loginView();
 }
-function loginView(){
+function loginView(msg){
+  const c=cloud();
   document.getElementById("app").innerHTML=`<div class="login card"><h2>🔧 Mantenimiento de Flota</h2>
-  <p class="mut">Ingresá con tu usuario y PIN.</p>
-  <form id="lf"><label>Usuario</label><input name="u" autocomplete="username" required>
-  <label>PIN</label><input name="p" type="password" autocomplete="current-password" required>
-  <p id="le" style="color:var(--crit);min-height:20px"></p>
+  <p class="mut">Ingresá con tu usuario y ${c?"clave":"PIN"}.</p>
+  <form id="lf"><label>Usuario</label><input name="u" autocomplete="username" autocapitalize="none" required>
+  <label>${c?"Clave":"PIN"}</label><input name="p" type="password" autocomplete="current-password" required>
+  <p id="le" style="color:var(--crit);min-height:20px">${esc(msg||"")}</p>
   <button class="btn big" style="width:100%">Ingresar</button></form>
-  <p class="mut" style="font-size:12px;margin-top:14px">Usuarios iniciales: <b>jefe</b>, <b>mecanico</b>, <b>obra</b> — PIN <b>1234</b>. Cambialos desde Administración.</p></div>`;
-  document.getElementById("lf").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);
-    const u=S.users.find(x=>x.user===f.get("u").trim().toLowerCase()&&x.pin===hash(f.get("p")));
+  ${c?'<p class="mut" style="font-size:12px;margin-top:14px">Datos compartidos en la nube. Si no tenés usuario, pedíselo al jefe de taller.</p>':'<p class="mut" style="font-size:12px;margin-top:14px">Modo local (sin nube). Usuarios iniciales: <b>jefe</b>, <b>mecanico</b>, <b>administrativo</b>, <b>obra</b> — PIN <b>1234</b>. Cambialos desde Administración.</p>'}</div>`;
+  document.getElementById("lf").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);
+    const un=f.get("u").trim().toLowerCase();
+    if(c){
+      try{await FB.AU.signInWithEmailAndPassword(FB.auth,un+NOMAIL,f.get("p"))}
+      catch(err){document.getElementById("le").textContent=["auth/invalid-credential","auth/wrong-password","auth/user-not-found","auth/invalid-email"].includes(err.code)?"Usuario o clave incorrectos":"Error: "+err.code}
+      return;
+    }
+    const u=S.users.find(x=>x.user===un&&x.pin===hash(f.get("p")));
     if(!u){document.getElementById("le").textContent="Usuario o PIN incorrecto";return}
     me=u;sessionStorage.setItem("sess",u.user);view=NAV[me.role][0][0];logEv("Ingreso","Inicio de sesión");render()};
 }
-function logout(){sessionStorage.removeItem("sess");me=null;loginView()}
+function logout(){if(cloud()){FB.AU.signOut(FB.auth);return}sessionStorage.removeItem("sess");me=null;loginView()}
 
 /* ============ Alertas ============ */
-function svcInfo(v){
-  const nextKm=v.lastSvcKm+v.svcKm, restKm=nextKm-v.km;
-  const nextF=addDays(v.lastSvcFecha,v.svcDias), restD=days(today(),nextF);
-  let st="ok";
-  if(restKm<=0||restD<=0)st="crit";else if(restKm<=S.cfg.kmAviso||restD<=S.cfg.diasAviso)st="warn";
-  return {nextKm,restKm,nextF,restD,st};
+function planOf(){return ((S.cfg.plan&&S.cfg.plan.length)?S.cfg.plan:DEF_PLAN).slice().sort((a,b)=>a.km-b.km)}
+function kmDia(v){
+  const pts=[];S.checklists.filter(k=>k.vehId===v.id).forEach(k=>pts.push([k.fecha,k.km]));
+  S.ots.filter(o=>o.vehId===v.id).forEach(o=>{pts.push([o.fechaAlta,o.kmIngreso]);if(o.fechaCierre&&o.kmCierre)pts.push([o.fechaCierre,o.kmCierre])});
+  const lim=addDays(today(),-90),p=pts.filter(x=>x[0]>=lim&&x[1]).sort((a,b)=>a[0].localeCompare(b[0]));
+  if(p.length>=2){const d=days(p[0][0],p[p.length-1][0]),dk=p[p.length-1][1]-p[0][1];if(d>=7&&dk>0)return dk/d}
+  return v.kmDia||60;
 }
+function planInfo(v){
+  const r=kmDia(v);
+  return planOf().map(it=>{
+    const last=(v.done&&v.done[it.id])||0,next=last+it.km,rest=next-v.km,dias=rest>0?Math.round(rest/r):0;
+    let st="ok";if(rest<=0)st="crit";else if(rest<=S.cfg.kmAviso||dias<=S.cfg.diasPrevio)st="warn";
+    return {it,next,rest,dias,st};
+  });
+}
+const nk=n=>Number(n).toLocaleString("es-AR");
 function alerts(){
   const A=[],c=S.cfg,t=today();
   for(const v of S.vehicles.filter(v=>v.activo)){
-    const s=svcInfo(v);
-    if(s.st!=="ok"){
-      const hasOT=S.ots.some(o=>o.vehId===v.id&&o.tipo==="Preventivo"&&o.estado!=="Cerrada");
-      A.push({nivel:s.st,cat:"service",veh:v.id,
-        txt:`${s.st==="crit"?"SERVICE VENCIDO":"Service próximo"} — ${v.code} ${v.plate}`,
-        sub:`Faltan ${s.restKm} km (límite ${s.nextKm} km) · vence ${fmtD(s.nextF)} (${s.restD} días)${hasOT?" · ya tiene OT preventiva abierta":" · sin OT preventiva"}`,
-        act:hasOT?null:{l:"Generar OT preventiva",f:`newOT('${v.id}','Preventivo')`,r:"jefe"}});
+    const pi=planInfo(v).filter(x=>x.st!=="ok");
+    if(pi.length){
+      const open=S.ots.filter(o=>o.vehId===v.id&&o.tipo==="Preventivo"&&o.estado!=="Cerrada");
+      const pend=pi.filter(x=>!open.some(o=>(o.items||[]).includes(x.it.id)));
+      A.push({nivel:pi.some(x=>x.st==="crit")?"crit":"warn",cat:"service",veh:v.id,
+        txt:`${pi.some(x=>x.st==="crit")?"MANTENIMIENTO PREVENTIVO VENCIDO":"Vence mantenimiento preventivo"} — ${v.code} ${v.plate}`,
+        sub:pi.map(x=>`${nk(x.it.km)} km (${x.it.t}): ${x.rest<=0?"vencido hace "+nk(-x.rest)+" km":"vence en ~"+x.dias+" días, faltan "+nk(x.rest)+" km (a los "+nk(x.next)+" km)"}`).join(" · ")+(pend.length?" · sin OT preventiva":" · ya tiene OT preventiva abierta"),
+        act:pend.length?{l:"Generar OT preventiva",f:`newOT('${v.id}','Preventivo',null,'${pend.map(x=>x.it.id).join(",")}')`,r:"jefe"}:null});
     }
     const lc=S.checklists.filter(k=>k.vehId===v.id).sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
     const d=lc?days(lc.fecha):null;
@@ -180,7 +273,7 @@ function alerts(){
 function alertsForMe(){
   const A=alerts();
   const vs=new Set(myVehicles().map(v=>v.id));
-  return A.filter(a=>vs.has(a.veh)&&(me.role==="jefe"||(me.role==="mecanico"&&["ot","service","reparacion"].includes(a.cat))||(me.role==="obra"&&["service","checklist","reparacion"].includes(a.cat))));
+  return A.filter(a=>vs.has(a.veh)&&(me.role==="jefe"||me.role==="administrativo"||(me.role==="mecanico"&&["ot","service","reparacion"].includes(a.cat))||(me.role==="obra"&&["service","checklist","reparacion"].includes(a.cat))));
 }
 function alertHTML(a){
   const can=a.act&&(a.act.r==="*"||a.act.r===me.role||me.role==="jefe");
@@ -196,7 +289,9 @@ function render(){
   <nav>${nav.map(([k,l])=>`<button class="${k===view?"on":""}" onclick="go('${k}')">${l}${k==="alertas"&&nA?` <span class="tag crit">${nA}</span>`:""}</button>`).join("")}</nav>
   <main id="main"></main>`;
   const f=V[view]||V.panel;
-  document.getElementById("main").innerHTML=f();
+  const ven=["jefe","administrativo","obra"].includes(me.role)&&view!=="alertas"?alertsForMe().filter(a=>a.cat==="service"):[];
+  const banner=ven.length?`<div class="alert ${ven.some(a=>a.nivel==="crit")?"crit":""}" style="cursor:pointer" onclick="go('alertas')"><div class="t"><b>⚠ ${ven.length} móvil${ven.length>1?"es":""} con mantenimiento preventivo vencido o por vencer (aviso ${S.cfg.diasPrevio} días antes)</b><small>${esc(ven.slice(0,3).map(a=>a.txt.split(" — ")[1]).join(" · "))}${ven.length>3?" …":""} — tocá para ver el detalle</small></div></div>`:"";
+  document.getElementById("main").innerHTML=banner+f();
   if(afterRender[view])afterRender[view]();
 }
 function go(v){view=v;render();window.scrollTo(0,0)}
@@ -221,7 +316,7 @@ V.panel=()=>{
 };
 V.alertas=()=>{
   const A=alertsForMe();
-  return `<div class="card"><h2>Alertas (${A.length})</h2><p class="mut">Vencimientos de service (aviso a ${S.cfg.kmAviso} km / ${S.cfg.diasAviso} días), OT sin cerrar (más de ${S.cfg.otDias} días), reparaciones detectadas sin OT y móviles sin checklist (más de ${S.cfg.checkDias} días).</p>${A.map(alertHTML).join("")||'<div class="empty">Sin alertas ✔</div>'}</div>`;
+  return `<div class="card"><h2>Alertas (${A.length})</h2><p class="mut">Vencimientos del plan preventivo (aviso ${S.cfg.diasPrevio} días antes, según el km diario de cada móvil), OT sin cerrar (más de ${S.cfg.otDias} días), reparaciones detectadas sin OT y móviles sin checklist (más de ${S.cfg.checkDias} días).</p>${A.map(alertHTML).join("")||'<div class="empty">Sin alertas ✔</div>'}</div>`;
 };
 
 /* ----- OT ----- */
@@ -244,27 +339,42 @@ V.ots=()=>{
   <button class="btn sec sm" onclick="csvOTs()">Exportar CSV</button></div>${otTable(l)}</div>`;
 };
 function vehOptions(sel){return S.vehicles.filter(v=>v.activo).map(v=>`<option value="${v.id}" ${sel===v.id?"selected":""}>${esc(v.code+" · "+v.plate+" — "+v.desc)}</option>`).join("")}
-function newOT(vehId,tipo,novId){
+function newOT(vehId,tipo,novId,itemIds){
   if(me.role!=="jefe")return;
   vehId=vehId||(S.vehicles[0]&&S.vehicles[0].id);tipo=tipo||"Correctivo";
   const nv=novId?S.novedades.find(n=>n.id===novId):null;
   const mecs=S.users.filter(u=>u.role==="mecanico");
-  const body=`<form id="f"><div class="grid2"><div><label>Móvil</label><select name="veh" id="ov" onchange="refNov()">${vehOptions(vehId)}</select></div>
-  <div><label>Tipo de mantenimiento</label><select name="tipo"><option ${tipo==="Preventivo"?"selected":""}>Preventivo</option><option ${tipo==="Correctivo"?"selected":""}>Correctivo</option></select></div>
+  const body=`<form id="f"><div class="grid2"><div><label>Móvil</label><select name="veh" id="ov" onchange="refNov();refPlan(true)">${vehOptions(vehId)}</select></div>
+  <div><label>Tipo de mantenimiento</label><select name="tipo" id="otipo" onchange="refPlan()"><option ${tipo==="Preventivo"?"selected":""}>Preventivo</option><option ${tipo==="Correctivo"?"selected":""}>Correctivo</option></select></div>
   <div><label>Prioridad</label><select name="prio"><option>Normal</option><option>Alta</option><option>Urgente</option></select></div>
   <div><label>Mecánico asignado</label><select name="asig"><option value="">Sin asignar</option>${mecs.map(m=>`<option value="${m.user}">${esc(m.name)}</option>`).join("")}</select></div>
   <div><label>Fecha</label><input type="date" name="fecha" value="${today()}" required></div>
   <div><label>Km al ingreso</label><input type="number" name="km" id="okm" min="0" required></div></div>
-  <label>Descripción del trabajo</label><textarea name="desc" required>${nv?esc(nv.item+(nv.obs?": "+nv.obs:"")):tipo==="Preventivo"?"Service preventivo según plan":""}</textarea>
+  <div id="planbox"></div>
+  <label>Descripción del trabajo</label><textarea name="desc" id="odesc" required data-auto="${nv?0:1}" oninput="this.dataset.auto=0">${nv?esc(nv.item+(nv.obs?": "+nv.obs:"")):""}</textarea>
   <div id="novbox"></div>
   <div class="row" style="margin-top:14px"><button class="btn">Crear orden</button></div></form>`;
   openDlg("Nueva orden de trabajo",body);
   window.refNov=()=>{const id=document.getElementById("ov").value;document.getElementById("okm").value=veh(id).km;
     const ns=S.novedades.filter(n=>n.vehId===id&&n.estado==="abierta"&&!n.otId);
     document.getElementById("novbox").innerHTML=ns.length?`<label>Vincular novedades de checklist detectadas</label>${ns.map(n=>`<label style="color:var(--ink)"><input type="checkbox" name="nov" value="${n.id}" style="width:auto" ${n.id===novId?"checked":""}> ${esc(n.item)} ${n.obs?"— "+esc(n.obs):""} <span class="mut">(${fmtD(n.fecha)})</span></label>`).join("")}`:""};
-  refNov();
-  document.getElementById("f").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);
-    const o={id:uid(),num:"OT-"+String(S.seq++).padStart(4,"0"),vehId:f.get("veh"),tipo:f.get("tipo"),prio:f.get("prio"),desc:f.get("desc").trim(),estado:"Abierta",fechaAlta:f.get("fecha"),fechaCierre:null,kmIngreso:+f.get("km"),kmCierre:null,asignado:f.get("asig"),creadoPor:me.user,mo:[],rep:[],hist:[],novs:f.getAll("nov"),trabajo:""};
+  let pre=itemIds?itemIds.split(","):null;
+  window.refPlan=first=>{
+    const pb=document.getElementById("planbox"),t=document.getElementById("otipo").value;
+    if(t!=="Preventivo"){pb.innerHTML="";return}
+    const v=veh(document.getElementById("ov").value),pi=planInfo(v);
+    const sel=pre&&first!==true?pre:pi.filter(x=>x.st!=="ok").map(x=>x.it.id);
+    pb.innerHTML='<label>Trabajos del plan preventivo a realizar</label>'+pi.map(x=>'<label style="color:var(--ink)"><input type="checkbox" name="pi" value="'+x.it.id+'" style="width:auto" onchange="refDesc()" '+(sel.includes(x.it.id)?"checked":"")+'> <b>'+nk(x.it.km)+' km</b> — '+esc(x.it.t)+' <span class="tag '+x.st+'">'+(x.rest<=0?"vencido":"faltan "+nk(x.rest)+" km")+'</span></label>').join("");
+    refDesc();
+  };
+  window.refDesc=()=>{const d=document.getElementById("odesc");if(d.dataset.auto!=="1")return;
+    const ids=[...document.querySelectorAll('#planbox input:checked')].map(i=>i.value);
+    d.value=ids.length?"Mantenimiento preventivo: "+planOf().filter(p=>ids.includes(p.id)).map(p=>nk(p.km)+" km ("+p.t+")").join("; "):""};
+  refNov();refPlan();
+  document.getElementById("f").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);
+    if(f.get("tipo")==="Preventivo"&&!f.getAll("pi").length){alert("Elegí al menos un trabajo del plan preventivo");return}
+    const n=cloud()?await nextSeq():S.seq++;
+    const o={id:uid(),num:"OT-"+String(n).padStart(4,"0"),vehId:f.get("veh"),tipo:f.get("tipo"),prio:f.get("prio"),desc:f.get("desc").trim(),estado:"Abierta",fechaAlta:f.get("fecha"),fechaCierre:null,kmIngreso:+f.get("km"),kmCierre:null,asignado:f.get("asig"),creadoPor:me.user,mo:[],rep:[],hist:[],novs:f.getAll("nov"),items:f.get("tipo")==="Preventivo"?f.getAll("pi"):[],trabajo:""};
     o.hist.push({t:nowStr(),user:me.user,txt:"OT creada ("+o.tipo+")"});
     S.ots.push(o);o.novs.forEach(id=>{const n=S.novedades.find(x=>x.id===id);if(n)n.otId=o.id});
     const v=veh(o.vehId);if(o.kmIngreso>v.km)v.km=o.kmIngreso;
@@ -277,7 +387,7 @@ function openOT(id){
   const canMO=!closed&&(me.role==="mecanico"||me.role==="jefe");
   const body=`<div class="row"><span class="tag ${o.tipo==="Preventivo"?"prev":"corr"}">${o.tipo}</span><span class="tag ${closed?"ok":"warn"}">${o.estado}</span><span class="tag">Prioridad ${o.prio}</span></div>
   <p><b>${esc(vname(o.vehId))}</b> — ${esc(v.desc)}<br>Alta ${fmtD(o.fechaAlta)} · Km ingreso ${o.kmIngreso}${closed?` · Cierre ${fmtD(o.fechaCierre)} · Km cierre ${o.kmCierre}`:""}<br>Asignado: ${asig?esc(asig.name):"sin asignar"}</p>
-  <p>${esc(o.desc)}</p>${o.novs.length?`<p class="mut">Novedades vinculadas: ${o.novs.map(i=>{const n=S.novedades.find(x=>x.id===i);return n?esc(n.item):""}).join(", ")}</p>`:""}
+  <p>${esc(o.desc)}</p>${(o.items||[]).length?`<p class="mut">Plan: ${planOf().filter(p=>o.items.includes(p.id)).map(p=>nk(p.km)+" km — "+esc(p.t)).join(" · ")}</p>`:""}${o.novs.length?`<p class="mut">Novedades vinculadas: ${o.novs.map(i=>{const n=S.novedades.find(x=>x.id===i);return n?esc(n.item):""}).join(", ")}</p>`:""}
   ${closed&&o.trabajo?`<p><b>Trabajo realizado:</b> ${esc(o.trabajo)}</p>`:""}
   <h4>Mano de obra (${hs} hs)</h4>${o.mo.length?`<div class="tw"><table><tr><th>Fecha</th><th>Mecánico</th><th>Horas</th><th>Tarea</th></tr>${o.mo.map(m=>`<tr><td>${fmtD(m.fecha)}</td><td>${esc(m.nombre)}</td><td>${m.horas}</td><td>${esc(m.tarea)}</td></tr>`).join("")}</table></div>`:'<div class="mut">Sin planillas cargadas</div>'}
   ${canMO?`<button class="btn sm" onclick="newMO('${o.id}')">＋ Cargar mano de obra</button>`:""}
@@ -292,13 +402,13 @@ function closeOTForm(id){
   const o=S.ots.find(x=>x.id===id);
   if(!o.mo.length){alert("Para cerrar la OT debe haber al menos una planilla de mano de obra cargada (trazabilidad).");return}
   openDlg("Cerrar "+o.num,`<form id="f"><div class="grid2"><div><label>Fecha de cierre</label><input type="date" name="fecha" value="${today()}" required></div><div><label>Km al cierre</label><input type="number" name="km" value="${Math.max(veh(o.vehId).km,o.kmIngreso)}" min="${o.kmIngreso}" required></div></div>
-  <label>Trabajo realizado</label><textarea name="trab" required></textarea>${o.tipo==="Preventivo"?'<p class="mut">Al cerrar, se actualiza el último service del móvil y se recalcula el próximo vencimiento.</p>':""}
+  <label>Trabajo realizado</label><textarea name="trab" required></textarea>${o.tipo==="Preventivo"?'<p class="mut">Al cerrar, se registran como realizados los trabajos del plan elegidos y se recalcula el próximo vencimiento de cada uno.</p>':""}
   <button class="btn" style="margin-top:12px">Cerrar orden</button></form>`);
   document.getElementById("f").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);
     o.estado="Cerrada";o.fechaCierre=f.get("fecha");o.kmCierre=+f.get("km");o.trabajo=f.get("trab").trim();
     o.hist.push({t:nowStr(),user:me.user,txt:"OT cerrada"});
     const v=veh(o.vehId);if(o.kmCierre>v.km)v.km=o.kmCierre;
-    if(o.tipo==="Preventivo"){v.lastSvcKm=o.kmCierre;v.lastSvcFecha=o.fechaCierre}
+    if(o.tipo==="Preventivo"){v.done=v.done||{};(o.items||[]).forEach(i=>{v.done[i]=o.kmCierre})}
     S.novedades.forEach(n=>{if(n.otId===o.id){n.estado="cerrada";n.fechaCierre=o.fechaCierre}});
     logEv("OT cerrada",`${o.num} ${o.tipo}`,o.vehId,o.id);closeDlg();render()};
 }
@@ -373,18 +483,20 @@ V.novedades=()=>{
 V.vehiculos=()=>{
   const vs=myVehicles();
   return `<div class="card"><div class="row"><h2 class="grow">Móviles</h2>${me.role==="jefe"?`<button class="btn" onclick="editVeh()">＋ Nuevo móvil</button>`:""}</div>
-  <div class="tw"><table><tr><th>Código</th><th>Patente</th><th>Descripción</th><th>Obra</th><th>Km</th><th>Próximo service</th><th></th></tr>${vs.map(v=>{const s=svcInfo(v);return `<tr><td><b>${esc(v.code)}</b></td><td>${esc(v.plate)}</td><td>${esc(v.desc)}</td><td>${esc(v.obra)}</td><td>${v.km}</td><td><span class="tag ${s.st}">${s.nextKm} km / ${fmtD(s.nextF)}</span><br><small class="mut">${s.restKm<=0?"vencido por km":s.restKm+" km"} · ${s.restD<=0?"vencido por fecha":s.restD+" días"}</small></td><td>${me.role==="jefe"?`<button class="btn sm sec" onclick="editVeh('${v.id}')">Editar</button> `:""}<button class="btn sm sec" onclick="trazaVeh('${v.id}')">Historia</button></td></tr>`}).join("")}</table></div></div>`;
+  <div class="tw"><table><tr><th>Código</th><th>Patente</th><th>Descripción</th><th>Obra</th><th>Km</th><th>Próximo mantenimiento</th><th></th></tr>${vs.map(v=>{const pi=planInfo(v),nx=pi.slice().sort((a,b)=>a.rest-b.rest)[0];return `<tr><td><b>${esc(v.code)}</b></td><td>${esc(v.plate)}</td><td>${esc(v.desc)}</td><td>${esc(v.obra)}</td><td>${nk(v.km)}</td><td>${nx?`<span class="tag ${nx.st}">${nk(nx.next)} km · ${esc(nx.it.t)}</span><br><small class="mut">${nx.rest<=0?"vencido hace "+nk(-nx.rest)+" km":"faltan "+nk(nx.rest)+" km (~"+nx.dias+" días)"}</small>`:"—"}</td><td>${me.role==="jefe"?`<button class="btn sm sec" onclick="editVeh('${v.id}')">Editar</button> `:""}<button class="btn sm sec" onclick="trazaVeh('${v.id}')">Historia</button></td></tr>`}).join("")}</table></div></div>`;
 };
 function editVeh(id){
-  const v=id?veh(id):{code:"",plate:"",desc:"",obra:"",km:0,svcKm:10000,svcDias:180,lastSvcKm:0,lastSvcFecha:today(),activo:true};
+  const v=id?veh(id):{code:"",plate:"",desc:"",obra:"",km:0,kmDia:60,done:{},activo:true};
   openDlg(id?"Editar móvil":"Nuevo móvil",`<form id="f"><div class="grid2"><div><label>Código interno</label><input name="code" value="${esc(v.code)}" required></div><div><label>Patente</label><input name="plate" value="${esc(v.plate)}" required></div>
   <div><label>Descripción</label><input name="desc" value="${esc(v.desc)}" required></div><div><label>Obra / destino</label><input name="obra" value="${esc(v.obra)}"></div>
-  <div><label>Km actual</label><input type="number" name="km" value="${v.km}" required></div><div><label>Service cada (km)</label><input type="number" name="svcKm" value="${v.svcKm}" required></div>
-  <div><label>Service cada (días)</label><input type="number" name="svcDias" value="${v.svcDias}" required></div><div><label>Km del último service</label><input type="number" name="lsk" value="${v.lastSvcKm}" required></div>
-  <div><label>Fecha del último service</label><input type="date" name="lsf" value="${v.lastSvcFecha}" required></div><div><label>Estado</label><select name="act"><option value="1" ${v.activo?"selected":""}>Activo</option><option value="0" ${!v.activo?"selected":""}>Baja</option></select></div></div>
+  <div><label>Km actual</label><input type="number" name="km" value="${v.km}" required></div><div><label>Km promedio por día (estimado)</label><input type="number" name="kmDia" value="${v.kmDia||60}" min="1" required></div>
+  <div><label>Estado</label><select name="act"><option value="1" ${v.activo?"selected":""}>Activo</option><option value="0" ${!v.activo?"selected":""}>Baja</option></select></div></div>
+  <label>Plan preventivo: km del odómetro al que se hizo cada trabajo la última vez (0 si nunca)</label>
+  <div class="grid2">${planOf().map(p=>`<div><label style="color:var(--ink)">${nk(p.km)} km — ${esc(p.t)}</label><input type="number" name="d_${p.id}" min="0" value="${(v.done&&v.done[p.id])||0}"></div>`).join("")}</div>
   <button class="btn" style="margin-top:12px">Guardar</button></form>`);
   document.getElementById("f").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);
-    const n=id?v:{id:uid()};Object.assign(n,{code:f.get("code").trim(),plate:f.get("plate").trim().toUpperCase(),desc:f.get("desc").trim(),obra:f.get("obra").trim(),km:+f.get("km"),svcKm:+f.get("svcKm"),svcDias:+f.get("svcDias"),lastSvcKm:+f.get("lsk"),lastSvcFecha:f.get("lsf"),activo:f.get("act")==="1"});
+    const n=id?v:{id:uid()};Object.assign(n,{code:f.get("code").trim(),plate:f.get("plate").trim().toUpperCase(),desc:f.get("desc").trim(),obra:f.get("obra").trim(),km:+f.get("km"),kmDia:+f.get("kmDia"),activo:f.get("act")==="1"});
+    n.done=n.done||{};planOf().forEach(p=>{n.done[p.id]=+f.get("d_"+p.id)||0});
     if(!id)S.vehicles.push(n);logEv(id?"Móvil editado":"Móvil creado",n.code+" "+n.plate,n.id);closeDlg();render()};
 }
 
@@ -404,8 +516,19 @@ V.stats=()=>{
   return `<div class="kpis"><div class="kpi"><b style="color:var(--prev)">${P}</b><span>Preventivos totales</span></div><div class="kpi"><b style="color:var(--corr)">${C}</b><span>Correctivos totales</span></div><div class="kpi"><b>${P+C?Math.round(P*100/(P+C)):0}%</b><span>Proporción preventivo</span></div><div class="kpi"><b>${R.reduce((s,r)=>s+r.hs,0)}</b><span>Horas de mano de obra</span></div></div>
   <div class="card"><h2>Mantenimientos por móvil</h2><p class="mut"><span class="bar" style="background:var(--prev);width:14px"></span> Preventivos &nbsp; <span class="bar" style="background:var(--corr);width:14px"></span> Correctivos</p>
   <div class="tw"><table><tr><th>Móvil</th><th>Gráfico</th><th>Preventivos (cerrados)</th><th>Correctivos (cerrados)</th><th>Horas MO</th><th>Repuestos $</th><th>Novedades abiertas</th></tr>${R.map(r=>`<tr><td><b>${esc(r.v.code)}</b><br><small class="mut">${esc(r.v.plate)}</small></td><td style="min-width:160px"><span class="bar" style="background:var(--prev);width:${r.p/max*100}%"></span><span class="bar" style="background:var(--corr);width:${r.c/max*100}%"></span></td><td>${r.p} (${r.pc})</td><td>${r.c} (${r.cc})</td><td>${r.hs}</td><td>${r.cost.toLocaleString("es-AR")}</td><td>${r.nov}</td></tr>`).join("")}</table></div>
-  <button class="btn sec sm" style="margin-top:10px" onclick="csvStats()">Exportar CSV</button></div>`;
+  <button class="btn sec sm" style="margin-top:10px" onclick="csvStats()">Exportar CSV</button></div>
+  <div class="card"><h2>Órdenes cerradas por mecánico</h2><p class="mut">Una OT cerrada cuenta para el mecánico si estaba asignada a él o si cargó mano de obra en ella.</p>
+  <div class="tw"><table><tr><th>Mecánico</th><th>OT cerradas</th><th>Preventivas</th><th>Correctivas</th><th>OT abiertas</th><th>Horas cargadas</th><th>Horas por OT cerrada</th></tr>${mecRows().map(r=>`<tr><td><b>${esc(r.u.name)}</b><br><small class="mut">${esc(r.u.user)}</small></td><td><b>${r.cer}</b></td><td>${r.cp}</td><td>${r.cc}</td><td>${r.abi}</td><td>${r.hs}</td><td>${r.cer?(r.hsCer/r.cer).toFixed(1):"—"}</td></tr>`).join("")||'<tr><td colspan="7" class="empty">No hay mecánicos cargados</td></tr>'}</table></div>
+  <button class="btn sec sm" style="margin-top:10px" onclick="csvMec()">Exportar CSV</button></div>`;
 };
+function mecRows(){
+  return S.users.filter(u=>u.role==="mecanico").map(u=>{
+    const mine=S.ots.filter(o=>o.asignado===u.user||o.mo.some(m=>m.user===u.user));
+    const cer=mine.filter(o=>o.estado==="Cerrada");
+    const hrs=o=>o.mo.filter(m=>m.user===u.user).reduce((s,m)=>s+m.horas,0);
+    return {u,cer:cer.length,cp:cer.filter(o=>o.tipo==="Preventivo").length,cc:cer.filter(o=>o.tipo==="Correctivo").length,abi:mine.length-cer.length,hs:mine.reduce((s,o)=>s+hrs(o),0),hsCer:cer.reduce((s,o)=>s+hrs(o),0)};
+  }).sort((a,b)=>b.cer-a.cer);
+}
 
 /* ----- Trazabilidad ----- */
 let fT="";
@@ -424,29 +547,75 @@ function trazaVeh(id){
 }
 
 /* ----- Administración ----- */
-V.admin=()=>`<div class="card"><div class="row"><h2 class="grow">Usuarios</h2><button class="btn" onclick="editUser()">＋ Nuevo usuario</button></div>
+V.admin=()=>`<div class="card"><div class="row"><h2 class="grow">Usuarios</h2><button class="btn sec" onclick="altaMec()">＋ Alta rápida de mecánicos</button><button class="btn" onclick="editUser()">＋ Nuevo usuario</button></div>
   <div class="tw"><table><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Obra</th><th></th></tr>${S.users.map(u=>`<tr><td>${esc(u.user)}</td><td>${esc(u.name)}</td><td>${ROLE_NAME[u.role]}</td><td>${esc(u.obra||"—")}</td><td><button class="btn sm sec" onclick="editUser('${u.user}')">Editar</button></td></tr>`).join("")}</table></div></div>
-  <div class="card"><h2>Parámetros de alertas</h2><form id="cf" class="grid2"><div><label>Avisar service cuando falten (km)</label><input type="number" name="kmAviso" value="${S.cfg.kmAviso}"></div><div><label>Avisar service cuando falten (días)</label><input type="number" name="diasAviso" value="${S.cfg.diasAviso}"></div>
+  <div class="card"><h2>Parámetros de alertas</h2><form id="cf" class="grid2"><div><label>Avisar mantenimiento preventivo con (días) de anticipación</label><input type="number" name="diasPrevio" value="${S.cfg.diasPrevio}"></div><div><label>Avisar también cuando falten menos de (km)</label><input type="number" name="kmAviso" value="${S.cfg.kmAviso}"></div>
   <div><label>OT sin cerrar a partir de (días)</label><input type="number" name="otDias" value="${S.cfg.otDias}"></div><div><label>Checklist faltante a partir de (días)</label><input type="number" name="checkDias" value="${S.cfg.checkDias}"></div>
   <div><label>Falla sin OT crítica a partir de (días)</label><input type="number" name="novDias" value="${S.cfg.novDias}"></div><div></div><div><button class="btn" style="margin-top:12px">Guardar parámetros</button></div></form></div>
-  <div class="card"><h2>Copia de seguridad</h2><p class="mut">Los datos se guardan en este navegador. Exportá una copia periódicamente o usala para pasar los datos a otra PC/celular.</p>
-  <div class="row"><button class="btn" onclick="exportJSON()">Descargar copia (JSON)</button><label class="btn sec" style="margin:0">Importar copia<input type="file" accept=".json" hidden onchange="importJSON(this.files[0])"></label><button class="btn danger" onclick="resetAll()">Borrar todo y reiniciar</button></div></div>`;
-afterRender.admin=()=>{document.getElementById("cf").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);for(const k in DEF_CFG)S.cfg[k]=+f.get(k);logEv("Configuración","Parámetros de alertas modificados");alert("Guardado");render()}};
+  <div class="card"><h2>Plan de mantenimiento preventivo</h2><p class="mut">Cada trabajo se repite según los km indicados. El aviso sale con la anticipación configurada arriba, estimando los días con el km diario de cada móvil.</p>
+  <form id="pf"><div id="prows">${planOf().map((p,i)=>planRow(p,i)).join("")}</div>
+  <div class="row" style="margin-top:10px"><button type="button" class="btn sec sm" onclick="document.getElementById('prows').insertAdjacentHTML('beforeend',planRow({id:'',km:'',t:''},Date.now()))">＋ Agregar trabajo</button><button class="btn">Guardar plan</button></div></form></div>
+  <div class="card"><h2>Copia de seguridad</h2>${cloud()?`<p class="mut">Los datos están en la nube y se comparten entre todos los usuarios. Podés descargar una copia por seguridad.</p><div class="row"><button class="btn" onclick="exportJSON()">Descargar copia (JSON)</button></div>`:`<p class="mut">Los datos se guardan en este navegador. Exportá una copia periódicamente o usala para pasar los datos a otra PC/celular.</p>
+  <div class="row"><button class="btn" onclick="exportJSON()">Descargar copia (JSON)</button><label class="btn sec" style="margin:0">Importar copia<input type="file" accept=".json" hidden onchange="importJSON(this.files[0])"></label><button class="btn danger" onclick="resetAll()">Borrar todo y reiniciar</button></div>`}</div>`;
+function planRow(p,i){return `<div class="row prow" style="margin-bottom:6px"><input type="hidden" name="id" value="${esc(p.id)}"><input type="number" name="km" value="${p.km}" min="1" placeholder="Km" style="width:110px" required><input name="t" value="${esc(p.t)}" placeholder="Trabajo a realizar" class="grow" required><button type="button" class="btn sm danger" onclick="this.parentNode.remove()">✕</button></div>`}
+afterRender.admin=()=>{
+  document.getElementById("cf").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);["diasPrevio","kmAviso","otDias","checkDias","novDias"].forEach(k=>S.cfg[k]=+f.get(k));logEv("Configuración","Parámetros de alertas modificados");alert("Guardado");render()};
+  document.getElementById("pf").onsubmit=e=>{e.preventDefault();
+    const plan=[...document.querySelectorAll("#prows .prow")].map(r=>({id:r.querySelector("[name=id]").value||"p"+uid(),km:+r.querySelector("[name=km]").value,t:r.querySelector("[name=t]").value.trim()}));
+    if(!plan.length){alert("El plan no puede quedar vacío");return}
+    S.cfg.plan=plan;logEv("Configuración","Plan de mantenimiento preventivo modificado");alert("Plan guardado");render()};
+};
 function editUser(u){
   const x=u?S.users.find(y=>y.user===u):{user:"",name:"",role:"mecanico",obra:""};
   openDlg(u?"Editar usuario":"Nuevo usuario",`<form id="f"><div class="grid2"><div><label>Usuario</label><input name="user" value="${esc(x.user)}" ${u?"readonly":""} required></div><div><label>Nombre</label><input name="name" value="${esc(x.name)}" required></div>
-  <div><label>Rol</label><select name="role"><option value="jefe" ${x.role==="jefe"?"selected":""}>Jefe de Taller</option><option value="mecanico" ${x.role==="mecanico"?"selected":""}>Mecánico</option><option value="obra" ${x.role==="obra"?"selected":""}>Obra</option></select></div>
+  <div><label>Rol</label><select name="role"><option value="jefe" ${x.role==="jefe"?"selected":""}>Jefe de Taller</option><option value="mecanico" ${x.role==="mecanico"?"selected":""}>Mecánico</option><option value="administrativo" ${x.role==="administrativo"?"selected":""}>Administrativo</option><option value="obra" ${x.role==="obra"?"selected":""}>Obra</option></select></div>
   <div><label>Obra (solo rol Obra)</label><input name="obra" value="${esc(x.obra||"")}"></div><div><label>PIN ${u?"(vacío = no cambiar)":""}</label><input name="pin" type="password" ${u?"":"required"}></div></div>
   <div class="row" style="margin-top:12px"><button class="btn">Guardar</button>${u&&u!==me.user?`<button type="button" class="btn danger" onclick="delUser('${u}')">Eliminar</button>`:""}</div></form>`);
-  document.getElementById("f").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);
-    const un=f.get("user").trim().toLowerCase();
+  document.getElementById("f").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);
+    const un=f.get("user").trim().toLowerCase(),pin=f.get("pin");
     if(!u&&S.users.some(y=>y.user===un)){alert("Ese usuario ya existe");return}
     if(u===me.user&&f.get("role")!=="jefe"){alert("No podés quitarte el rol de jefe");return}
+    if(cloud()){
+      const {A,AU,cfg}=FB;
+      if(!u){
+        if(!/^[a-z0-9._-]+$/.test(un)){alert("El usuario solo puede tener letras minúsculas, números, punto, guion y guion bajo");return}
+        if(pin.length<6){alert("La clave debe tener al menos 6 caracteres");return}
+        try{let sec;try{sec=A.getApp("sec")}catch(_){sec=A.initializeApp(cfg,"sec")}
+          const a2=AU.getAuth(sec);await AU.createUserWithEmailAndPassword(a2,un+NOMAIL,pin);await AU.signOut(a2)}
+        catch(err){alert(err.code==="auth/email-already-in-use"?"Ese usuario ya existe en el sistema de acceso (puede haber sido eliminado antes). Usá otro nombre.":"No se pudo crear: "+err.message);return}
+      }else if(pin){
+        if(u!==me.user){alert("La clave de otro usuario solo puede cambiarla él mismo (o el administrador desde la consola de Firebase).");return}
+        if(pin.length<6){alert("La clave debe tener al menos 6 caracteres");return}
+        try{await AU.updatePassword(FB.auth.currentUser,pin)}catch(err){alert("No se pudo cambiar la clave. Cerrá sesión, volvé a entrar y reintentá.");return}
+      }
+    }
     const n=u?x:{user:un};Object.assign(n,{name:f.get("name").trim(),role:f.get("role"),obra:f.get("obra").trim()});
-    if(f.get("pin"))n.pin=hash(f.get("pin"));if(!u)S.users.push(n);
+    if(pin&&!cloud())n.pin=hash(pin);if(!u)S.users.push(n);
     logEv(u?"Usuario editado":"Usuario creado",un);closeDlg();render()};
 }
-function delUser(u){if(confirm("¿Eliminar el usuario "+u+"?")){S.users=S.users.filter(x=>x.user!==u);logEv("Usuario eliminado",u);closeDlg();render()}}
+function slug(s){return s.normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().trim().replace(/[^a-z0-9]+/g,".").replace(/^\.|\.$/g,"")}
+function altaMec(){
+  const c=cloud();
+  openDlg("Alta rápida de mecánicos",`<form id="f"><label>Nombres (uno por línea, por ejemplo 4 mecánicos)</label><textarea name="n" rows="5" placeholder="Juan Pérez&#10;Carlos Gómez&#10;Luis Díaz&#10;Pedro Ruiz" required></textarea>
+  <label>${c?"Clave inicial (mín. 6 caracteres)":"PIN inicial"} para todos</label><input name="p" type="text" required>
+  <p class="mut">El usuario se arma con el nombre (ej. juan.perez). Cada mecánico puede cambiar su clave después, desde Editar.</p>
+  <button class="btn" style="margin-top:12px">Crear mecánicos</button></form>`);
+  document.getElementById("f").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target),pin=f.get("p").trim();
+    if(c&&pin.length<6){alert("La clave debe tener al menos 6 caracteres");return}
+    const names=f.get("n").split("\n").map(s=>s.trim()).filter(Boolean);const ok=[],bad=[];
+    for(const name of names){
+      const un=slug(name);
+      if(!un||S.users.some(y=>y.user===un)){bad.push(name+" (usuario ya existe)");continue}
+      if(c){const {A,AU,cfg}=FB;try{let sec;try{sec=A.getApp("sec")}catch(_){sec=A.initializeApp(cfg,"sec")}
+        const a2=AU.getAuth(sec);await AU.createUserWithEmailAndPassword(a2,un+NOMAIL,pin);await AU.signOut(a2)}
+        catch(err){bad.push(name+" ("+(err.code==="auth/email-already-in-use"?"ya existe en el sistema de acceso":err.message)+")");continue}}
+      const n={user:un,name,role:"mecanico",obra:""};if(!c)n.pin=hash(pin);S.users.push(n);ok.push(un);
+    }
+    if(ok.length)logEv("Usuarios creados","Mecánicos: "+ok.join(", "));
+    closeDlg();render();
+    alert((ok.length?"Creados: "+ok.join(", ")+".\n":"")+(bad.length?"No creados: "+bad.join("; "):""));};
+}
+function delUser(u){if(confirm("¿Eliminar el usuario "+u+"?"+(cloud()?" Pierde el acceso a la aplicación.":""))){S.users=S.users.filter(x=>x.user!==u);logEv("Usuario eliminado",u);closeDlg();render()}}
 
 /* ============ Utilidades ============ */
 function openDlg(t,h){document.getElementById("dt").textContent=t;document.getElementById("dbody").innerHTML=h;const d=document.getElementById("dlg");if(!d.open)d.showModal()}
@@ -455,11 +624,27 @@ function download(name,txt,type){const a=document.createElement("a");a.href=URL.
 function csv(rows){return "﻿"+rows.map(r=>r.map(c=>'"'+String(c??"").replace(/"/g,'""')+'"').join(";")).join("\r\n")}
 function csvOTs(){download("ordenes_trabajo.csv",csv([["N°","Móvil","Tipo","Prioridad","Estado","Alta","Cierre","Km ingreso","Km cierre","Horas MO","Repuestos $","Descripción","Trabajo realizado"],...S.ots.map(o=>[o.num,vname(o.vehId),o.tipo,o.prio,o.estado,o.fechaAlta,o.fechaCierre,o.kmIngreso,o.kmCierre,o.mo.reduce((s,m)=>s+m.horas,0),o.rep.reduce((s,r)=>s+r.cant*r.costo,0),o.desc,o.trabajo])]),"text/csv")}
 function csvStats(){download("estadisticas_moviles.csv",csv([["Móvil","Patente","Preventivos","Prev. cerrados","Correctivos","Corr. cerrados","Horas MO","Repuestos $","Novedades abiertas"],...statRows().map(r=>[r.v.code,r.v.plate,r.p,r.pc,r.c,r.cc,r.hs,r.cost,r.nov])]),"text/csv")}
+function csvMec(){download("ordenes_por_mecanico.csv",csv([["Mecánico","Usuario","OT cerradas","Preventivas","Correctivas","OT abiertas","Horas"],...mecRows().map(r=>[r.u.name,r.u.user,r.cer,r.cp,r.cc,r.abi,r.hs])]),"text/csv")}
 function exportJSON(){download("mantenimiento_backup_"+today()+".json",JSON.stringify(S,null,1),"application/json")}
 function importJSON(f){if(!f)return;const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!d.vehicles||!d.users)throw 0;if(!confirm("Esto reemplaza todos los datos actuales. ¿Continuar?"))return;S=d;save();alert("Datos importados. Volvé a ingresar.");logout()}catch(e){alert("Archivo inválido")}};r.readAsText(f)}
 function resetAll(){if(confirm("Se borrarán TODOS los datos de este navegador. ¿Seguro?")&&confirm("Última confirmación: borrar todo.")){localStorage.removeItem(KEY);sessionStorage.clear();location.reload()}}
 document.getElementById("dlg").addEventListener("click",e=>{if(e.target.id==="dlg")closeDlg()});
-boot();
+window.startApp=boot;
+</script>
+<script type="module">
+let FB=null;
+let cfg=null;
+try{cfg=(await import("./firebase-config.js")).default}catch(e){}
+try{
+  if(cfg&&cfg.apiKey){
+    const V="10.12.2",B="https://www.gstatic.com/firebasejs/"+V+"/";
+    const [A,AU,F]=await Promise.all([import(B+"firebase-app.js"),import(B+"firebase-auth.js"),import(B+"firebase-firestore.js")]);
+    const app=A.initializeApp(cfg);
+    FB={A,AU,F,cfg,auth:AU.getAuth(app),db:F.getFirestore(app)};
+  }
+}catch(e){console.error(e);alert("No se pudo conectar con la nube; se usa el modo local. "+e.message)}
+window.FB=FB;
+window.startApp();
 </script>
 </body>
 </html>
