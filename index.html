@@ -79,7 +79,11 @@ const DEF_PLAN=[
   {id:"p20",km:20000,t:"Batería y filtros"},
   {id:"p50",km:50000,t:"Sistema de refrigeración"},
   {id:"p100",km:100000,t:"Correa de distribución"}];
-const DEF_CFG = {kmAviso:500, diasPrevio:30, otDias:7, checkDias:7, novDias:3, plan:DEF_PLAN};
+const DEF_PLAN_HS=[
+  {id:"h250",km:250,t:"Servicio completo (aceite y filtros)"},
+  {id:"h500",km:500,t:"Revisión general y correas"},
+  {id:"h1000",km:1000,t:"Sistema hidráulico y refrigeración"}];
+const DEF_CFG = {kmAviso:500, hsAviso:25, diasPrevio:30, otDias:7, checkDias:7, novDias:3, plan:DEF_PLAN, planHs:DEF_PLAN_HS};
 
 function hash(s){let h=5381;for(const c of s)h=((h<<5)+h+c.charCodeAt(0))|0;return String(h)}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
@@ -225,19 +229,25 @@ function loginView(msg){
 function logout(){if(cloud()){FB.AU.signOut(FB.auth);return}sessionStorage.removeItem("sess");me=null;loginView()}
 
 /* ============ Alertas ============ */
-function planOf(){return ((S.cfg.plan&&S.cfg.plan.length)?S.cfg.plan:DEF_PLAN).slice().sort((a,b)=>a.km-b.km)}
+const unitOf=v=>v&&v.unidad==="hs"?"hs":"km";
+const punit=p=>String(p.id).startsWith("h")?"hs":"km";
+function planOf(u){
+  const a=u==="hs"?((S.cfg.planHs&&S.cfg.planHs.length)?S.cfg.planHs:DEF_PLAN_HS):((S.cfg.plan&&S.cfg.plan.length)?S.cfg.plan:DEF_PLAN);
+  return a.slice().sort((x,y)=>x.km-y.km);
+}
+const allPlan=()=>planOf("km").concat(planOf("hs"));
 function kmDia(v){
   const pts=[];S.checklists.filter(k=>k.vehId===v.id).forEach(k=>pts.push([k.fecha,k.km]));
   S.ots.filter(o=>o.vehId===v.id).forEach(o=>{pts.push([o.fechaAlta,o.kmIngreso]);if(o.fechaCierre&&o.kmCierre)pts.push([o.fechaCierre,o.kmCierre])});
   const lim=addDays(today(),-90),p=pts.filter(x=>x[0]>=lim&&x[1]).sort((a,b)=>a[0].localeCompare(b[0]));
   if(p.length>=2){const d=days(p[0][0],p[p.length-1][0]),dk=p[p.length-1][1]-p[0][1];if(d>=7&&dk>0)return dk/d}
-  return v.kmDia||60;
+  return v.kmDia||(unitOf(v)==="hs"?6:60);
 }
 function planInfo(v){
-  const r=kmDia(v);
-  return planOf().map(it=>{
+  const r=kmDia(v),u=unitOf(v),lim=u==="hs"?S.cfg.hsAviso:S.cfg.kmAviso;
+  return planOf(u).map(it=>{
     const last=(v.done&&v.done[it.id])||0,next=last+it.km,rest=next-v.km,dias=rest>0?Math.round(rest/r):0;
-    let st="ok";if(rest<=0)st="crit";else if(rest<=S.cfg.kmAviso||dias<=S.cfg.diasPrevio)st="warn";
+    let st="ok";if(rest<=0)st="crit";else if(rest<=lim||dias<=S.cfg.diasPrevio)st="warn";
     return {it,next,rest,dias,st};
   });
 }
@@ -251,7 +261,7 @@ function alerts(){
       const pend=pi.filter(x=>!open.some(o=>(o.items||[]).includes(x.it.id)));
       A.push({nivel:pi.some(x=>x.st==="crit")?"crit":"warn",cat:"service",veh:v.id,
         txt:`${pi.some(x=>x.st==="crit")?"MANTENIMIENTO PREVENTIVO VENCIDO":"Vence mantenimiento preventivo"} — ${v.code} ${v.plate}`,
-        sub:pi.map(x=>`${nk(x.it.km)} km (${x.it.t}): ${x.rest<=0?"vencido hace "+nk(-x.rest)+" km":"vence en ~"+x.dias+" días, faltan "+nk(x.rest)+" km (a los "+nk(x.next)+" km)"}`).join(" · ")+(pend.length?" · sin OT preventiva":" · ya tiene OT preventiva abierta"),
+        sub:pi.map(x=>`${nk(x.it.km)} ${unitOf(v)} (${x.it.t}): ${x.rest<=0?"vencido hace "+nk(-x.rest)+" "+unitOf(v):"vence en ~"+x.dias+" días, faltan "+nk(x.rest)+" "+unitOf(v)+" (a las "+nk(x.next)+" "+unitOf(v)+")"}`).join(" · ")+(pend.length?" · sin OT preventiva":" · ya tiene OT preventiva abierta"),
         act:pend.length?{l:"Generar OT preventiva",f:`newOT('${v.id}','Preventivo',null,'${pend.map(x=>x.it.id).join(",")}')`,r:"jefe"}:null});
     }
     const lc=S.checklists.filter(k=>k.vehId===v.id).sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
@@ -350,7 +360,7 @@ function newOT(vehId,tipo,novId,itemIds){
   <div><label>Prioridad</label><select name="prio"><option>Normal</option><option>Alta</option><option>Urgente</option></select></div>
   <div><label>Mecánico asignado</label><select name="asig"><option value="">Sin asignar</option>${mecs.map(m=>`<option value="${m.user}">${esc(m.name)}</option>`).join("")}</select></div>
   <div><label>Fecha</label><input type="date" name="fecha" value="${today()}" required></div>
-  <div><label>Km al ingreso</label><input type="number" name="km" id="okm" min="0" required></div></div>
+  <div><label>Km u horas al ingreso</label><input type="number" name="km" id="okm" min="0" required></div></div>
   <div id="planbox"></div>
   <label>Descripción del trabajo</label><textarea name="desc" id="odesc" required data-auto="${nv?0:1}" oninput="this.dataset.auto=0">${nv?esc(nv.item+(nv.obs?": "+nv.obs:"")):""}</textarea>
   <div id="novbox"></div>
@@ -365,12 +375,12 @@ function newOT(vehId,tipo,novId,itemIds){
     if(t!=="Preventivo"){pb.innerHTML="";return}
     const v=veh(document.getElementById("ov").value),pi=planInfo(v);
     const sel=pre&&first!==true?pre:pi.filter(x=>x.st!=="ok").map(x=>x.it.id);
-    pb.innerHTML='<label>Trabajos del plan preventivo a realizar</label>'+pi.map(x=>'<label style="color:var(--ink)"><input type="checkbox" name="pi" value="'+x.it.id+'" style="width:auto" onchange="refDesc()" '+(sel.includes(x.it.id)?"checked":"")+'> <b>'+nk(x.it.km)+' km</b> — '+esc(x.it.t)+' <span class="tag '+x.st+'">'+(x.rest<=0?"vencido":"faltan "+nk(x.rest)+" km")+'</span></label>').join("");
+    pb.innerHTML='<label>Trabajos del plan preventivo a realizar</label>'+pi.map(x=>'<label style="color:var(--ink)"><input type="checkbox" name="pi" value="'+x.it.id+'" style="width:auto" onchange="refDesc()" '+(sel.includes(x.it.id)?"checked":"")+'> <b>'+nk(x.it.km)+' '+unitOf(v)+'</b> — '+esc(x.it.t)+' <span class="tag '+x.st+'">'+(x.rest<=0?"vencido":"faltan "+nk(x.rest)+" "+unitOf(v))+'</span></label>').join("");
     refDesc();
   };
   window.refDesc=()=>{const d=document.getElementById("odesc");if(d.dataset.auto!=="1")return;
     const ids=[...document.querySelectorAll('#planbox input:checked')].map(i=>i.value);
-    d.value=ids.length?"Mantenimiento preventivo: "+planOf().filter(p=>ids.includes(p.id)).map(p=>nk(p.km)+" km ("+p.t+")").join("; "):""};
+    d.value=ids.length?"Mantenimiento preventivo: "+allPlan().filter(p=>ids.includes(p.id)).map(p=>nk(p.km)+" "+punit(p)+" ("+p.t+")").join("; "):""};
   refNov();refPlan();
   document.getElementById("f").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);
     if(f.get("tipo")==="Preventivo"&&!f.getAll("pi").length){alert("Elegí al menos un trabajo del plan preventivo");return}
@@ -388,7 +398,7 @@ function openOT(id){
   const canMO=!closed&&(me.role==="mecanico"||me.role==="jefe");
   const body=`<div class="row"><span class="tag ${o.tipo==="Preventivo"?"prev":"corr"}">${o.tipo}</span><span class="tag ${closed?"ok":"warn"}">${o.estado}</span><span class="tag">Prioridad ${o.prio}</span></div>
   <p><b>${esc(vname(o.vehId))}</b> — ${esc(v.desc)}<br>Alta ${fmtD(o.fechaAlta)} · Km ingreso ${o.kmIngreso}${closed?` · Cierre ${fmtD(o.fechaCierre)} · Km cierre ${o.kmCierre}`:""}<br>Asignado: ${asig?esc(asig.name):"sin asignar"}</p>
-  <p>${esc(o.desc)}</p>${(o.items||[]).length?`<p class="mut">Plan: ${planOf().filter(p=>o.items.includes(p.id)).map(p=>nk(p.km)+" km — "+esc(p.t)).join(" · ")}</p>`:""}${o.novs.length?`<p class="mut">Novedades vinculadas: ${o.novs.map(i=>{const n=S.novedades.find(x=>x.id===i);return n?esc(n.item):""}).join(", ")}</p>`:""}
+  <p>${esc(o.desc)}</p>${(o.items||[]).length?`<p class="mut">Plan: ${allPlan().filter(p=>o.items.includes(p.id)).map(p=>nk(p.km)+" "+punit(p)+" — "+esc(p.t)).join(" · ")}</p>`:""}${o.novs.length?`<p class="mut">Novedades vinculadas: ${o.novs.map(i=>{const n=S.novedades.find(x=>x.id===i);return n?esc(n.item):""}).join(", ")}</p>`:""}
   ${closed&&o.trabajo?`<p><b>Trabajo realizado:</b> ${esc(o.trabajo)}</p>`:""}
   <h4>Mano de obra (${hs} hs)</h4>${o.mo.length?`<div class="tw"><table><tr><th>Fecha</th><th>Mecánico</th><th>Horas</th><th>Tarea</th></tr>${o.mo.map(m=>`<tr><td>${fmtD(m.fecha)}</td><td>${esc(m.nombre)}</td><td>${m.horas}</td><td>${esc(m.tarea)}</td></tr>`).join("")}</table></div>`:'<div class="mut">Sin planillas cargadas</div>'}
   ${canMO?`<button class="btn sm" onclick="newMO('${o.id}')">＋ Cargar mano de obra</button>`:""}
@@ -402,7 +412,7 @@ function setEstado(id,e){const o=S.ots.find(x=>x.id===id);o.estado=e;o.hist.push
 function closeOTForm(id){
   const o=S.ots.find(x=>x.id===id);
   if(!o.mo.length){alert("Para cerrar la OT debe haber al menos una planilla de mano de obra cargada (trazabilidad).");return}
-  openDlg("Cerrar "+o.num,`<form id="f"><div class="grid2"><div><label>Fecha de cierre</label><input type="date" name="fecha" value="${today()}" required></div><div><label>Km al cierre</label><input type="number" name="km" value="${Math.max(veh(o.vehId).km,o.kmIngreso)}" min="${o.kmIngreso}" required></div></div>
+  openDlg("Cerrar "+o.num,`<form id="f"><div class="grid2"><div><label>Fecha de cierre</label><input type="date" name="fecha" value="${today()}" required></div><div><label>Km u horas al cierre</label><input type="number" name="km" value="${Math.max(veh(o.vehId).km,o.kmIngreso)}" min="${o.kmIngreso}" required></div></div>
   <label>Trabajo realizado</label><textarea name="trab" required></textarea>${o.tipo==="Preventivo"?'<p class="mut">Al cerrar, se registran como realizados los trabajos del plan elegidos y se recalcula el próximo vencimiento de cada uno.</p>':""}
   <button class="btn" style="margin-top:12px">Cerrar orden</button></form>`);
   document.getElementById("f").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);
@@ -455,7 +465,7 @@ function newCheck(vehId){
   vehId=vehId||vs[0].id;
   openDlg("Checklist de móvil",`<form id="f"><div class="grid2"><div><label>Móvil</label><select name="veh" id="cv" onchange="document.getElementById('ckm').value=veh(this.value).km">${vs.map(v=>`<option value="${v.id}" ${v.id===vehId?"selected":""}>${esc(v.code+" · "+v.plate+" — "+v.desc)}</option>`).join("")}</select></div>
   <div><label>Fecha</label><input type="date" name="fecha" value="${today()}" required></div>
-  <div><label>Kilometraje actual</label><input type="number" id="ckm" name="km" value="${veh(vehId).km}" min="0" required></div></div>
+  <div><label>Kilometraje u horas actuales</label><input type="number" id="ckm" name="km" value="${veh(vehId).km}" min="0" required></div></div>
   <label>Controles (marcar Bien / Mal / N/A)</label>
   ${ITEMS.map((it,i)=>`<div class="ck"><span>${it}</span><div class="opts"><label><input type="radio" name="r${i}" value="ok" checked> Bien</label><label><input type="radio" name="r${i}" value="mal"> Mal</label><label><input type="radio" name="r${i}" value="na"> N/A</label></div><input type="text" name="o${i}" placeholder="Observación (obligatoria si está Mal)"></div>`).join("")}
   <label>Observaciones generales</label><textarea name="gen"></textarea><button class="btn big" style="margin-top:12px;width:100%">Guardar checklist</button></form>`);
@@ -483,22 +493,26 @@ V.novedades=()=>{
 /* ----- Móviles ----- */
 V.vehiculos=()=>{
   const vs=myVehicles();
-  return `<div class="card"><div class="row"><h2 class="grow">Móviles</h2>${me.role==="administrativo"?`<button class="btn" onclick="editVeh()">＋ Nuevo móvil</button>`:""}</div>
-  <div class="tw"><table><tr><th>Código</th><th>Patente</th><th>Descripción</th><th>Obra</th><th>Km</th><th>Próximo mantenimiento</th><th></th></tr>${vs.map(v=>{const pi=planInfo(v),nx=pi.slice().sort((a,b)=>a.rest-b.rest)[0];return `<tr><td><b>${esc(v.code)}</b></td><td>${esc(v.plate)}</td><td>${esc(v.desc)}</td><td>${esc(v.obra)}</td><td>${nk(v.km)}</td><td>${nx?`<span class="tag ${nx.st}">${nk(nx.next)} km · ${esc(nx.it.t)}</span><br><small class="mut">${nx.rest<=0?"vencido hace "+nk(-nx.rest)+" km":"faltan "+nk(nx.rest)+" km (~"+nx.dias+" días)"}</small>`:"—"}</td><td>${me.role==="administrativo"?`<button class="btn sm sec" onclick="editVeh('${v.id}')">Editar</button> `:""}<button class="btn sm sec" onclick="trazaVeh('${v.id}')">Historia</button></td></tr>`}).join("")}</table></div></div>`;
+  return `<div class="card"><div class="row"><h2 class="grow">Móviles (${vs.length})</h2>${me.role==="administrativo"?`<button class="btn sec" onclick="impMoviles()">Importar desde Excel</button><button class="btn" onclick="editVeh()">＋ Nuevo móvil</button>`:""}</div>
+  <div class="tw"><table><tr><th>Código</th><th>Patente</th><th>Descripción</th><th>Obra</th><th>Km / hs</th><th>Próximo mantenimiento</th><th></th></tr>${vs.map(v=>{const pi=planInfo(v),nx=pi.slice().sort((a,b)=>a.rest-b.rest)[0];return `<tr><td><b>${esc(v.code)}</b></td><td>${esc(v.plate)}</td><td>${esc(v.desc)}</td><td>${esc(v.obra)}</td><td>${nk(v.km)} ${unitOf(v)}</td><td>${nx?`<span class="tag ${nx.st}">${nk(nx.next)} ${unitOf(v)} · ${esc(nx.it.t)}</span><br><small class="mut">${nx.rest<=0?"vencido hace "+nk(-nx.rest)+" "+unitOf(v):"faltan "+nk(nx.rest)+" "+unitOf(v)+" (~"+nx.dias+" días)"}</small>`:"—"}</td><td>${me.role==="administrativo"?`<button class="btn sm sec" onclick="editVeh('${v.id}')">Editar</button> `:""}<button class="btn sm sec" onclick="trazaVeh('${v.id}')">Historia</button></td></tr>`}).join("")}</table></div></div>`;
 };
 function editVeh(id){
   if(me.role!=="administrativo")return;
-  const v=id?veh(id):{code:"",plate:"",desc:"",obra:"",km:0,kmDia:60,done:{},activo:true};
+  const v=id?veh(id):{code:"",plate:"",desc:"",obra:"",km:0,kmDia:60,unidad:"km",done:{},activo:true};
   openDlg(id?"Editar móvil":"Nuevo móvil",`<form id="f"><div class="grid2"><div><label>Código interno</label><input name="code" value="${esc(v.code)}" required></div><div><label>Patente</label><input name="plate" value="${esc(v.plate)}" required></div>
   <div><label>Descripción</label><input name="desc" value="${esc(v.desc)}" required></div><div><label>Obra / destino</label><input name="obra" value="${esc(v.obra)}"></div>
-  <div><label>Km actual</label><input type="number" name="km" value="${v.km}" required></div><div><label>Km promedio por día (estimado)</label><input type="number" name="kmDia" value="${v.kmDia||60}" min="1" required></div>
+  <div><label>Se controla por</label><select name="unidad" id="vun" onchange="drawPlanIn()"><option value="km" ${unitOf(v)==="km"?"selected":""}>Kilómetros (km)</option><option value="hs" ${unitOf(v)==="hs"?"selected":""}>Horas de uso (hs)</option></select></div>
+  <div><label>Km u horas actuales</label><input type="number" name="km" value="${v.km}" required></div><div><label>Uso promedio por día (km u hs, estimado)</label><input type="number" name="kmDia" value="${v.kmDia||60}" min="0.1" step="any" required></div>
   <div><label>Estado</label><select name="act"><option value="1" ${v.activo?"selected":""}>Activo</option><option value="0" ${!v.activo?"selected":""}>Baja</option></select></div></div>
-  <label>Plan preventivo: km del odómetro al que se hizo cada trabajo la última vez (0 si nunca)</label>
-  <div class="grid2">${planOf().map(p=>`<div><label style="color:var(--ink)">${nk(p.km)} km — ${esc(p.t)}</label><input type="number" name="d_${p.id}" min="0" value="${(v.done&&v.done[p.id])||0}"></div>`).join("")}</div>
+  <label>Plan preventivo: km u horas del contador a las que se hizo cada trabajo la última vez (0 si nunca)</label>
+  <div class="grid2" id="planin"></div>
   <button class="btn" style="margin-top:12px">Guardar</button></form>`);
+  window.drawPlanIn=()=>{const u=document.getElementById("vun").value;
+    document.getElementById("planin").innerHTML=planOf(u).map(p=>'<div><label style="color:var(--ink)">'+nk(p.km)+' '+u+' — '+esc(p.t)+'</label><input type="number" name="d_'+p.id+'" min="0" value="'+((v.done&&v.done[p.id])||0)+'"></div>').join("")};
+  drawPlanIn();
   document.getElementById("f").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);
-    const n=id?v:{id:uid()};Object.assign(n,{code:f.get("code").trim(),plate:f.get("plate").trim().toUpperCase(),desc:f.get("desc").trim(),obra:f.get("obra").trim(),km:+f.get("km"),kmDia:+f.get("kmDia"),activo:f.get("act")==="1"});
-    n.done=n.done||{};planOf().forEach(p=>{n.done[p.id]=+f.get("d_"+p.id)||0});
+    const n=id?v:{id:uid()};Object.assign(n,{unidad:f.get("unidad"),code:f.get("code").trim(),plate:f.get("plate").trim().toUpperCase(),desc:f.get("desc").trim(),obra:f.get("obra").trim(),km:+f.get("km"),kmDia:+f.get("kmDia"),activo:f.get("act")==="1"});
+    n.done=n.done||{};planOf(n.unidad).forEach(p=>{n.done[p.id]=+f.get("d_"+p.id)||0});
     if(!id)S.vehicles.push(n);logEv(id?"Móvil editado":"Móvil creado",n.code+" "+n.plate,n.id);closeDlg();render()};
 }
 
@@ -551,21 +565,25 @@ function trazaVeh(id){
 /* ----- Administración ----- */
 V.admin=()=>`<div class="card"><div class="row"><h2 class="grow">Usuarios</h2><button class="btn sec" onclick="altaMec()">＋ Alta rápida de mecánicos</button><button class="btn" onclick="editUser()">＋ Nuevo usuario</button></div>
   <div class="tw"><table><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Obra</th><th></th></tr>${S.users.map(u=>`<tr><td>${esc(u.user)}</td><td>${esc(u.name)}</td><td>${ROLE_NAME[u.role]}</td><td>${esc(u.obra||"—")}</td><td><button class="btn sm sec" onclick="editUser('${u.user}')">Editar</button></td></tr>`).join("")}</table></div></div>
-  <div class="card"><h2>Parámetros de alertas</h2><form id="cf" class="grid2"><div><label>Avisar mantenimiento preventivo con (días) de anticipación</label><input type="number" name="diasPrevio" value="${S.cfg.diasPrevio}"></div><div><label>Avisar también cuando falten menos de (km)</label><input type="number" name="kmAviso" value="${S.cfg.kmAviso}"></div>
+  <div class="card"><h2>Parámetros de alertas</h2><form id="cf" class="grid2"><div><label>Avisar mantenimiento preventivo con (días) de anticipación</label><input type="number" name="diasPrevio" value="${S.cfg.diasPrevio}"></div><div><label>Avisar también cuando falten menos de (km)</label><input type="number" name="kmAviso" value="${S.cfg.kmAviso}"></div><div><label>Avisar también cuando falten menos de (hs)</label><input type="number" name="hsAviso" value="${S.cfg.hsAviso}"></div>
   <div><label>OT sin cerrar a partir de (días)</label><input type="number" name="otDias" value="${S.cfg.otDias}"></div><div><label>Checklist faltante a partir de (días)</label><input type="number" name="checkDias" value="${S.cfg.checkDias}"></div>
-  <div><label>Falla sin OT crítica a partir de (días)</label><input type="number" name="novDias" value="${S.cfg.novDias}"></div><div></div><div><button class="btn" style="margin-top:12px">Guardar parámetros</button></div></form></div>
-  <div class="card"><h2>Plan de mantenimiento preventivo</h2><p class="mut">Cada trabajo se repite según los km indicados. El aviso sale con la anticipación configurada arriba, estimando los días con el km diario de cada móvil.</p>
-  <form id="pf"><div id="prows">${planOf().map((p,i)=>planRow(p,i)).join("")}</div>
-  <div class="row" style="margin-top:10px"><button type="button" class="btn sec sm" onclick="document.getElementById('prows').insertAdjacentHTML('beforeend',planRow({id:'',km:'',t:''},Date.now()))">＋ Agregar trabajo</button><button class="btn">Guardar plan</button></div></form></div>
+  <div><label>Falla sin OT crítica a partir de (días)</label><input type="number" name="novDias" value="${S.cfg.novDias}"></div><div><button class="btn" style="margin-top:12px">Guardar parámetros</button></div></form></div>
+  <div class="card"><h2>Plan de mantenimiento preventivo</h2><p class="mut">Cada trabajo se repite según los km (o las horas) indicados. El aviso sale con la anticipación configurada arriba, estimando los días con el uso diario de cada móvil.</p>
+  <form id="pf"><h3>Vehículos controlados por km</h3><div id="prows">${planOf("km").map(p=>planRow(p,"km")).join("")}</div>
+  <button type="button" class="btn sec sm" onclick="document.getElementById('prows').insertAdjacentHTML('beforeend',planRow({id:'',km:'',t:''},'km'))">＋ Agregar trabajo por km</button>
+  <h3 style="margin-top:16px">Equipos controlados por horas (generadores, retroexcavadoras…)</h3><div id="hrows">${planOf("hs").map(p=>planRow(p,"hs")).join("")}</div>
+  <button type="button" class="btn sec sm" onclick="document.getElementById('hrows').insertAdjacentHTML('beforeend',planRow({id:'',km:'',t:''},'hs'))">＋ Agregar trabajo por horas</button>
+  <div class="row" style="margin-top:14px"><button class="btn">Guardar plan</button></div></form></div>
   <div class="card"><h2>Copia de seguridad</h2>${cloud()?`<p class="mut">Los datos están en la nube y se comparten entre todos los usuarios. Podés descargar una copia por seguridad.</p><div class="row"><button class="btn" onclick="exportJSON()">Descargar copia (JSON)</button></div>`:`<p class="mut">Los datos se guardan en este navegador. Exportá una copia periódicamente o usala para pasar los datos a otra PC/celular.</p>
   <div class="row"><button class="btn" onclick="exportJSON()">Descargar copia (JSON)</button><label class="btn sec" style="margin:0">Importar copia<input type="file" accept=".json" hidden onchange="importJSON(this.files[0])"></label><button class="btn danger" onclick="resetAll()">Borrar todo y reiniciar</button></div>`}</div>`;
-function planRow(p,i){return `<div class="row prow" style="margin-bottom:6px"><input type="hidden" name="id" value="${esc(p.id)}"><input type="number" name="km" value="${p.km}" min="1" placeholder="Km" style="width:110px" required><input name="t" value="${esc(p.t)}" placeholder="Trabajo a realizar" class="grow" required><button type="button" class="btn sm danger" onclick="this.parentNode.remove()">✕</button></div>`}
+function planRow(p,u){return `<div class="row prow" style="margin-bottom:6px"><input type="hidden" name="id" value="${esc(p.id)}"><input type="number" name="km" value="${p.km}" min="1" placeholder="${u}" style="width:110px" required><input name="t" value="${esc(p.t)}" placeholder="Trabajo a realizar" class="grow" required><button type="button" class="btn sm danger" onclick="this.parentNode.remove()">✕</button></div>`}
 afterRender.admin=()=>{
-  document.getElementById("cf").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);["diasPrevio","kmAviso","otDias","checkDias","novDias"].forEach(k=>S.cfg[k]=+f.get(k));logEv("Configuración","Parámetros de alertas modificados");alert("Guardado");render()};
+  document.getElementById("cf").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);["diasPrevio","kmAviso","hsAviso","otDias","checkDias","novDias"].forEach(k=>S.cfg[k]=+f.get(k));logEv("Configuración","Parámetros de alertas modificados");alert("Guardado");render()};
   document.getElementById("pf").onsubmit=e=>{e.preventDefault();
-    const plan=[...document.querySelectorAll("#prows .prow")].map(r=>({id:r.querySelector("[name=id]").value||"p"+uid(),km:+r.querySelector("[name=km]").value,t:r.querySelector("[name=t]").value.trim()}));
-    if(!plan.length){alert("El plan no puede quedar vacío");return}
-    S.cfg.plan=plan;logEv("Configuración","Plan de mantenimiento preventivo modificado");alert("Plan guardado");render()};
+    const rd=(sel,pre)=>[...document.querySelectorAll(sel+" .prow")].map(r=>({id:r.querySelector("[name=id]").value||pre+uid(),km:+r.querySelector("[name=km]").value,t:r.querySelector("[name=t]").value.trim()}));
+    const plan=rd("#prows","p"),planHs=rd("#hrows","h");
+    if(!plan.length||!planHs.length){alert("Cada plan debe tener al menos un trabajo");return}
+    S.cfg.plan=plan;S.cfg.planHs=planHs;logEv("Configuración","Plan de mantenimiento preventivo modificado");alert("Plan guardado");render()};
 };
 function editUser(u){
   const x=u?S.users.find(y=>y.user===u):{user:"",name:"",role:"mecanico",obra:""};
@@ -617,6 +635,96 @@ function altaMec(){
     closeDlg();render();
     alert((ok.length?"Creados: "+ok.join(", ")+".\n":"")+(bad.length?"No creados: "+bad.join("; "):""));};
 }
+/* ----- Importar móviles desde Excel / CSV ----- */
+const normK=s=>String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/[^a-z0-9]/g,"");
+const normPlate=s=>String(s||"").toUpperCase().replace(/\s+/g,"");
+const HS_RE=/generad|gener\b|gener |retro|retre|excavadora|minicargadora|autoelevador|manipulador|hoyadora|martillo|vibrocomp|tiradora|puller|barquilla|tractor/i;
+function parseNum(v){
+  if(v==null||v==="")return null;
+  if(typeof v==="number")return v;
+  let s=String(v).trim().replace(/\s*(km|hs|hrs|h)\.?$/i,"");
+  if(/^\d{1,3}(\.\d{3})+$/.test(s))s=s.replace(/\./g,"");
+  else if(/^\d{1,3}(,\d{3})+$/.test(s))s=s.replace(/,/g,"");
+  else s=s.replace(",",".");
+  const n=parseFloat(s);return isNaN(n)?null:n;
+}
+function parseCSV(text){
+  text=text.replace(/^﻿/,"");
+  const first=text.split(/\r?\n/)[0]||"";
+  const d=[";",",","\t"].map(c=>[c,first.split(c).length]).sort((a,b)=>b[1]-a[1])[0][0];
+  const rows=[];let row=[],cur="",q=false;
+  for(let i=0;i<text.length;i++){const c=text[i];
+    if(q){if(c==='"'){if(text[i+1]==='"'){cur+='"';i++}else q=false}else cur+=c}
+    else if(c==='"')q=true;
+    else if(c===d){row.push(cur);cur=""}
+    else if(c==="\n"||c==="\r"){if(c==="\r"&&text[i+1]==="\n")i++;row.push(cur);cur="";rows.push(row);row=[]}
+    else cur+=c}
+  if(cur!==""||row.length){row.push(cur);rows.push(row)}
+  return rows;
+}
+function loadXLSX(){
+  return new Promise((res,rej)=>{
+    if(window.XLSX)return res(window.XLSX);
+    const s=document.createElement("script");s.src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+    s.onload=()=>res(window.XLSX);s.onerror=()=>rej(new Error("No se pudo cargar el lector de Excel. Guardá el archivo como CSV e intentá de nuevo."));
+    document.head.appendChild(s);
+  });
+}
+const IMP_COLS={codigo:["codigo","cod","interno","codigointerno","nro","numero"],patente:["patente","dominio","matricula"],desc:["descripcion","detalle","modelo","marca","vehiculo"],tipo:["tipo","clase"],obra:["obra","destino","ubicacion"],unidad:["unidad","um","controlpor"],km:["km","hs","kmhs","kmactual","horas","kmhsactual","kmuhoras","odometro","horometro","kmultimoservicio","kmhsultimoservicio"],uso:["uso","usopordia","kmpordia","hspordia","kmdia","usodiario"]};
+let impRows=[];
+function impMoviles(){
+  if(me.role!=="administrativo")return;
+  openDlg("Importar móviles desde Excel o CSV",`<p class="mut">Primera fila = títulos de columna. Columnas reconocidas: <b>Patente</b> (obligatoria), Código, Descripción, Tipo, Obra, Unidad (km o hs), Km/Hs actual, Uso por día. Los que ya existen (misma patente) se omiten.</p>
+  <p><a href="#" onclick="descPlantilla();return false">Descargar plantilla CSV</a></p>
+  <input type="file" id="impf" accept=".xlsx,.xls,.csv,.txt">
+  <div id="impprev" style="margin-top:12px"></div>`);
+  document.getElementById("impf").onchange=e=>leerImport(e.target.files[0]);
+}
+function descPlantilla(){download("plantilla_moviles.csv",csv([["Código","Patente","Descripción","Tipo","Obra","Unidad","Km/Hs actual","Uso por día"],["M-10","AB123CD","Toyota Hilux","Camioneta","1239","km",48200,60],["G-01","123/29975","Generador 45 kva","Generador","1227","hs",2489,6]]),"text/csv")}
+async function leerImport(file){
+  if(!file)return;const box=document.getElementById("impprev");box.innerHTML='<p class="mut">Leyendo archivo…</p>';
+  try{
+    let grid;
+    if(/\.(csv|txt)$/i.test(file.name))grid=parseCSV(await file.text());
+    else{const X=await loadXLSX();const wb=X.read(await file.arrayBuffer(),{type:"array"});grid=X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:true,defval:""})}
+    const hi=grid.findIndex(r=>r.some(c=>IMP_COLS.patente.includes(normK(c))));
+    if(hi<0){box.innerHTML='<p style="color:var(--crit)">No encontré la columna "Patente" (o "Dominio") en la primera fila.</p>';return}
+    const idx={};grid[hi].forEach((c,i)=>{const k=normK(c);for(const f in IMP_COLS)if(idx[f]===undefined&&IMP_COLS[f].includes(k))idx[f]=i});
+    const get=(r,f)=>idx[f]===undefined?"":r[idx[f]];
+    const seen=new Set(S.vehicles.map(v=>normPlate(v.plate)));impRows=[];
+    for(const r of grid.slice(hi+1)){
+      const plate=normPlate(get(r,"patente"));if(!plate)continue;
+      const tipo=String(get(r,"tipo")).trim(),descr=String(get(r,"desc")).trim(),ud=String(get(r,"unidad")).trim().toLowerCase();
+      const kmRaw=get(r,"km"),unidad=ud.startsWith("h")?"hs":ud.startsWith("k")?"km":(/hs/i.test(String(kmRaw))||HS_RE.test(tipo+" "+descr))?"hs":"km";
+      const km=parseNum(kmRaw);
+      let st="ok",msg="Nuevo";
+      if(seen.has(plate)){st="skip";msg="Ya existe / repetido"}
+      else if(km===null){st="warn";msg="Sin km/hs (queda en 0)"}
+      seen.add(plate);
+      impRows.push({plate,code:String(get(r,"codigo")).trim()||plate,desc:[tipo,descr].filter(Boolean).join(" ")||plate,obra:String(get(r,"obra")).trim(),unidad,km:km||0,kmDia:parseNum(get(r,"uso"))||(unidad==="hs"?6:60),st,msg});
+    }
+    drawImport();
+  }catch(err){box.innerHTML='<p style="color:var(--crit)">Error: '+esc(err.message)+'</p>'}
+}
+function drawImport(){
+  const ok=impRows.filter(r=>r.st!=="skip"),sk=impRows.length-ok.length;
+  document.getElementById("impprev").innerHTML=`<p><b>${ok.length}</b> móviles para importar${sk?` · <span class="mut">${sk} omitidos</span>`:""}</p>
+  <label style="color:var(--ink)"><input type="checkbox" id="impal" checked style="width:auto"> Considerar el plan preventivo <b>al día</b> hasta el km/hs cargado (el próximo vencimiento será el siguiente múltiplo de cada intervalo). Si lo desmarcás, todo queda como "nunca hecho" y salta vencido.</label>
+  <div class="tw" style="max-height:300px;overflow:auto"><table><tr><th>Patente</th><th>Descripción</th><th>Obra</th><th>Unidad</th><th>Km/Hs</th><th>Estado</th></tr>${impRows.slice(0,200).map(r=>`<tr><td>${esc(r.plate)}</td><td>${esc(r.desc)}</td><td>${esc(r.obra)}</td><td>${r.unidad}</td><td>${nk(r.km)}</td><td><span class="tag ${r.st==="ok"?"ok":r.st==="warn"?"warn":""}">${esc(r.msg)}</span></td></tr>`).join("")}</table></div>
+  ${impRows.length>200?`<p class="mut">Se muestran los primeros 200.</p>`:""}
+  <button class="btn" style="margin-top:12px" ${ok.length?"":"disabled"} onclick="confirmarImport()">Importar ${ok.length} móviles</button>`;
+}
+function confirmarImport(){
+  const al=document.getElementById("impal").checked,ok=impRows.filter(r=>r.st!=="skip");
+  ok.forEach(r=>{
+    const v={id:uid(),code:r.code,plate:r.plate,desc:r.desc,obra:r.obra,km:r.km,kmDia:r.kmDia,unidad:r.unidad,done:{},activo:true};
+    planOf(r.unidad).forEach(p=>{v.done[p.id]=al?Math.floor(r.km/p.km)*p.km:0});
+    S.vehicles.push(v);
+  });
+  logEv("Importación de móviles",ok.length+" móviles importados desde archivo");
+  closeDlg();render();alert(ok.length+" móviles importados.");
+}
+
 function delUser(u){if(confirm("¿Eliminar el usuario "+u+"?"+(cloud()?" Pierde el acceso a la aplicación.":""))){S.users=S.users.filter(x=>x.user!==u);logEv("Usuario eliminado",u);closeDlg();render()}}
 
 /* ============ Utilidades ============ */
