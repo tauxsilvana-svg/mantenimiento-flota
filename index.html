@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mantenimiento de Flota</title>
+<style>
+:root{--bg:#f3f5f8;--card:#fff;--ink:#1c2430;--mut:#667085;--line:#e2e6ec;--pri:#1f5fbf;--ok:#1a8a4a;--warn:#c77700;--crit:#c62828;--prev:#1f5fbf;--corr:#d9622b}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.45 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:#14233b;color:#fff;padding:10px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:sticky;top:0;z-index:5}
+header h1{font-size:17px;margin:0;flex:1}
+header .who{font-size:13px;opacity:.9}
+nav{display:flex;gap:4px;flex-wrap:wrap;background:#fff;border-bottom:1px solid var(--line);padding:6px 12px;position:sticky;top:48px;z-index:4}
+nav button{border:0;background:none;padding:8px 12px;border-radius:6px;cursor:pointer;font:inherit;color:var(--mut)}
+nav button.on{background:#e7effb;color:var(--pri);font-weight:600}
+main{max-width:1150px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+.card h2{margin:0 0 10px;font-size:16px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.grow{flex:1}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
+.kpi b{display:block;font-size:26px}
+.kpi span{color:var(--mut);font-size:13px}
+button.btn,a.btn{background:var(--pri);color:#fff;border:0;border-radius:8px;padding:9px 14px;cursor:pointer;font:inherit;font-weight:600;text-decoration:none;display:inline-block}
+button.btn.sec{background:#e7ebf1;color:var(--ink)}
+button.btn.big{padding:12px 20px;font-size:16px}
+button.btn.sm{padding:4px 9px;font-size:13px}
+button.btn.danger{background:var(--crit)}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top;font-size:14px}
+th{color:var(--mut);font-weight:600;font-size:12px;text-transform:uppercase}
+.tw{overflow-x:auto}
+.tag{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;font-weight:600;background:#eef1f5;color:var(--mut)}
+.tag.prev{background:#e3edfb;color:var(--prev)}.tag.corr{background:#fbe9df;color:var(--corr)}
+.tag.ok{background:#e1f4e8;color:var(--ok)}.tag.warn{background:#fdf0d9;color:var(--warn)}.tag.crit{background:#fbe3e3;color:var(--crit)}
+.alert{display:flex;gap:10px;padding:10px 12px;border-left:5px solid var(--warn);background:#fffaf0;border-radius:6px;margin-bottom:8px;align-items:center}
+.alert.crit{border-color:var(--crit);background:#fff3f3}
+.alert .t{flex:1}
+.alert small{color:var(--mut);display:block}
+label{display:block;font-size:13px;color:var(--mut);margin:8px 0 3px}
+input,select,textarea{width:100%;padding:8px;border:1px solid #c9d0da;border-radius:7px;font:inherit;background:#fff}
+textarea{min-height:70px}
+dialog{border:0;border-radius:12px;padding:0;width:min(720px,96vw);max-height:92vh;box-shadow:0 10px 40px #0005}
+dialog::backdrop{background:#0006}
+.dh{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff}
+.dh h3{margin:0;font-size:17px}.db{padding:14px 16px 18px;overflow:auto;max-height:78vh}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+@media(max-width:560px){.grid2{grid-template-columns:1fr}}
+.ck{display:grid;grid-template-columns:1fr auto;gap:6px 10px;padding:7px 0;border-bottom:1px solid var(--line);align-items:center}
+.ck .opts{display:flex;gap:4px}
+.ck .opts label{display:inline-flex;gap:3px;margin:0;padding:4px 8px;border:1px solid #c9d0da;border-radius:6px;cursor:pointer;color:var(--ink);font-size:13px}
+.ck .opts input{width:auto}
+.ck input[type=text]{grid-column:1/-1}
+.bar{height:14px;border-radius:4px;display:inline-block;vertical-align:middle}
+.tl{border-left:3px solid var(--line);margin-left:6px;padding-left:14px}
+.tl div{margin-bottom:10px;position:relative}
+.tl div:before{content:"";position:absolute;left:-20px;top:6px;width:10px;height:10px;border-radius:50%;background:var(--pri)}
+.tl small{color:var(--mut)}
+.login{max-width:360px;margin:12vh auto}
+.mut{color:var(--mut)}
+.empty{color:var(--mut);padding:14px;text-align:center}
+@media print{header,nav,.noprint{display:none!important}dialog{box-shadow:none}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<dialog id="dlg"><div class="dh"><h3 id="dt"></h3><button class="btn sec sm" onclick="closeDlg()">✕</button></div><div class="db" id="dbody"></div></dialog>
+
+<script>
+"use strict";
+/* ============ Datos ============ */
+const KEY = "mantenimiento_flota_v1";
+const ITEMS = ["Luces (delanteras/traseras/giro)","Frenos","Neumáticos (estado y presión)","Nivel de aceite motor","Nivel de refrigerante","Líquido de frenos","Batería","Dirección / suspensión","Correas y mangueras","Pérdidas de fluidos","Limpiaparabrisas / espejos","Bocina / alarma de retroceso","Extintor y botiquín","Documentación / VTV / seguro","Carrocería / cabina","Limpieza general"];
+const DEF_CFG = {kmAviso:500, diasAviso:15, otDias:7, checkDias:7, novDias:3};
+
+function hash(s){let h=5381;for(const c of s)h=((h<<5)+h+c.charCodeAt(0))|0;return String(h)}
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
+function today(){const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")}
+function days(a,b){return Math.round((new Date((b||today())+"T00:00:00")-new Date(a+"T00:00:00"))/864e5)}
+function addDays(a,n){const d=new Date(a+"T00:00:00");d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)}
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function fmtD(d){return d?d.split("-").reverse().join("/"):"—"}
+function nowStr(){return new Date().toISOString()}
+function fmtT(t){const d=new Date(t);return d.toLocaleString("es-AR",{dateStyle:"short",timeStyle:"short"})}
+
+function seed(){
+  const t=today();
+  return {
+    cfg:{...DEF_CFG},
+    seq:1,
+    users:[
+      {user:"jefe",name:"Jefe de Taller",role:"jefe",pin:hash("1234"),obra:""},
+      {user:"mecanico",name:"Mecánico 1",role:"mecanico",pin:hash("1234"),obra:""},
+      {user:"obra",name:"Encargado Obra Norte",role:"obra",pin:hash("1234"),obra:"Obra Norte"}
+    ],
+    vehicles:[
+      {id:uid(),code:"M-01",plate:"AB123CD",desc:"Camioneta Toyota Hilux",obra:"Obra Norte",km:48200,svcKm:10000,svcDias:180,lastSvcKm:40500,lastSvcFecha:addDays(t,-120),activo:true},
+      {id:uid(),code:"M-02",plate:"AC456EF",desc:"Camión Mercedes 1720",obra:"Obra Norte",km:122900,svcKm:15000,svcDias:180,lastSvcKm:108000,lastSvcFecha:addDays(t,-60),activo:true},
+      {id:uid(),code:"M-03",plate:"AD789GH",desc:"Retroexcavadora CAT 416",obra:"Obra Sur",km:6100,svcKm:5000,svcDias:120,lastSvcKm:1200,lastSvcFecha:addDays(t,-125),activo:true}
+    ],
+    ots:[],checklists:[],novedades:[],log:[]
+  };
+}
+let S;
+function load(){try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){S=null}if(!S){S=seed();save()}S.cfg={...DEF_CFG,...S.cfg}}
+function save(){localStorage.setItem(KEY,JSON.stringify(S))}
+function logEv(accion,detalle,vehId,otId){S.log.unshift({t:nowStr(),user:me.user,rol:me.role,accion,detalle,vehId:vehId||null,otId:otId||null});save()}
+
+/* ============ Sesión ============ */
+let me=null, view="";
+const NAV={
+  jefe:[["panel","Panel"],["alertas","Alertas"],["ots","Órdenes de trabajo"],["novedades","Novedades"],["checklists","Checklists"],["mo","Mano de obra"],["vehiculos","Móviles"],["stats","Estadísticas"],["traza","Trazabilidad"],["admin","Administración"]],
+  mecanico:[["panel","Panel"],["alertas","Alertas"],["ots","Órdenes de trabajo"],["mo","Mano de obra"],["vehiculos","Móviles"]],
+  obra:[["checklists","Checklists"],["alertas","Alertas"],["vehiculos","Móviles"]]
+};
+const ROLE_NAME={jefe:"Jefe de Taller",mecanico:"Mecánico",obra:"Obra"};
+function veh(id){return S.vehicles.find(v=>v.id===id)}
+function vname(id){const v=veh(id);return v?`${v.code} · ${v.plate}`:"?"}
+function myVehicles(){return S.vehicles.filter(v=>v.activo&&(me.role!=="obra"||!me.obra||v.obra===me.obra))}
+
+function boot(){
+  load();
+  const u=sessionStorage.getItem("sess");
+  me=u?S.users.find(x=>x.user===u):null;
+  if(me){view=NAV[me.role][0][0];render()}else loginView();
+}
+function loginView(){
+  document.getElementById("app").innerHTML=`<div class="login card"><h2>🔧 Mantenimiento de Flota</h2>
+  <p class="mut">Ingresá con tu usuario y PIN.</p>
+  <form id="lf"><label>Usuario</label><input name="u" autocomplete="username" required>
+  <label>PIN</label><input name="p" type="password" autocomplete="current-password" required>
+  <p id="le" style="color:var(--crit);min-height:20px"></p>
+  <button class="btn big" style="width:100%">Ingresar</button></form>
+  <p class="mut" style="font-size:12px;margin-top:14px">Usuarios iniciales: <b>jefe</b>, <b>mecanico</b>, <b>obra</b> — PIN <b>1234</b>. Cambialos desde Administración.</p></div>`;
+  document.getElementById("lf").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);
+    const u=S.users.find(x=>x.user===f.get("u").trim().toLowerCase()&&x.pin===hash(f.get("p")));
+    if(!u){document.getElementById("le").textContent="Usuario o PIN incorrecto";return}
+    me=u;sessionStorage.setItem("sess",u.user);view=NAV[me.role][0][0];logEv("Ingreso","Inicio de sesión");render()};
+}
+function logout(){sessionStorage.removeItem("sess");me=null;loginView()}
+
+/* ============ Alertas ============ */
+function svcInfo(v){
+  const nextKm=v.lastSvcKm+v.svcKm, restKm=nextKm-v.km;
+  const nextF=addDays(v.lastSvcFecha,v.svcDias), restD=days(today(),nextF);
+  let st="ok";
+  if(restKm<=0||restD<=0)st="crit";else if(restKm<=S.cfg.kmAviso||restD<=S.cfg.diasAviso)st="warn";
+  return {nextKm,restKm,nextF,restD,st};
+}
+function alerts(){
+  const A=[],c=S.cfg,t=today();
+  for(const v of S.vehicles.filter(v=>v.activo)){
+    const s=svcInfo(v);
+    if(s.st!=="ok"){
+      const hasOT=S.ots.some(o=>o.vehId===v.id&&o.tipo==="Preventivo"&&o.estado!=="Cerrada");
+      A.push({nivel:s.st,cat:"service",veh:v.id,
+        txt:`${s.st==="crit"?"SERVICE VENCIDO":"Service próximo"} — ${v.code} ${v.plate}`,
+        sub:`Faltan ${s.restKm} km (límite ${s.nextKm} km) · vence ${fmtD(s.nextF)} (${s.restD} días)${hasOT?" · ya tiene OT preventiva abierta":" · sin OT preventiva"}`,
+        act:hasOT?null:{l:"Generar OT preventiva",f:`newOT('${v.id}','Preventivo')`,r:"jefe"}});
+    }
+    const lc=S.checklists.filter(k=>k.vehId===v.id).sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
+    const d=lc?days(lc.fecha):null;
+    if(!lc||d>c.checkDias)A.push({nivel:"warn",cat:"checklist",veh:v.id,txt:`Sin checklist — ${v.code} ${v.plate}`,sub:lc?`Último checklist hace ${d} días (${fmtD(lc.fecha)})`:"Nunca se cargó un checklist",act:{l:"Cargar checklist",f:`newCheck('${v.id}')`,r:"obra"}});
+  }
+  for(const o of S.ots.filter(o=>o.estado!=="Cerrada")){
+    const a=days(o.fechaAlta);
+    if(a>c.otDias)A.push({nivel:"crit",cat:"ot",veh:o.vehId,ot:o.id,txt:`OT sin cerrar — ${o.num} (${o.tipo})`,sub:`${vname(o.vehId)} · abierta hace ${a} días · estado ${o.estado}`,act:{l:"Ver OT",f:`openOT('${o.id}')`,r:"*"}});
+    else if(o.estado==="Abierta"&&a>=2)A.push({nivel:"warn",cat:"ot",veh:o.vehId,ot:o.id,txt:`OT sin iniciar — ${o.num}`,sub:`${vname(o.vehId)} · ${a} días en estado Abierta`,act:{l:"Ver OT",f:`openOT('${o.id}')`,r:"*"}});
+  }
+  for(const n of S.novedades.filter(n=>n.estado==="abierta"&&!n.otId)){
+    const a=days(n.fecha);
+    A.push({nivel:a>c.novDias?"crit":"warn",cat:"reparacion",veh:n.vehId,txt:`Falta reparación — ${vname(n.vehId)}`,sub:`${n.item}${n.obs?": "+n.obs:""} · detectado hace ${a} días, sin OT correctiva`,act:{l:"Generar OT correctiva",f:`newOT('${n.vehId}','Correctivo','${n.id}')`,r:"jefe"}});
+  }
+  const o={crit:0,warn:1};
+  A.sort((x,y)=>o[x.nivel]-o[y.nivel]);
+  return A;
+}
+function alertsForMe(){
+  const A=alerts();
+  const vs=new Set(myVehicles().map(v=>v.id));
+  return A.filter(a=>vs.has(a.veh)&&(me.role==="jefe"||(me.role==="mecanico"&&["ot","service","reparacion"].includes(a.cat))||(me.role==="obra"&&["service","checklist","reparacion"].includes(a.cat))));
+}
+function alertHTML(a){
+  const can=a.act&&(a.act.r==="*"||a.act.r===me.role||me.role==="jefe");
+  return `<div class="alert ${a.nivel}"><div class="t"><b>${esc(a.txt)}</b><small>${esc(a.sub)}</small></div>${can?`<button class="btn sm" onclick="${a.act.f}">${a.act.l}</button>`:""}</div>`;
+}
+
+/* ============ Render ============ */
+function render(){
+  const nav=NAV[me.role];
+  const nA=alertsForMe().length;
+  document.getElementById("app").innerHTML=`
+  <header><h1>🔧 Mantenimiento de Flota</h1><span class="who">${esc(me.name)} · ${ROLE_NAME[me.role]}${me.obra?" · "+esc(me.obra):""}</span><button class="btn sec sm" onclick="logout()">Salir</button></header>
+  <nav>${nav.map(([k,l])=>`<button class="${k===view?"on":""}" onclick="go('${k}')">${l}${k==="alertas"&&nA?` <span class="tag crit">${nA}</span>`:""}</button>`).join("")}</nav>
+  <main id="main"></main>`;
+  const f=V[view]||V.panel;
+  document.getElementById("main").innerHTML=f();
+  if(afterRender[view])afterRender[view]();
+}
+function go(v){view=v;render();window.scrollTo(0,0)}
+const afterRender={};
+
+const V={};
+V.panel=()=>{
+  const A=alertsForMe(),crit=A.filter(a=>a.nivel==="crit").length;
+  const open=S.ots.filter(o=>o.estado!=="Cerrada");
+  const mine=me.role==="mecanico"?open.filter(o=>!o.asignado||o.asignado===me.user):open;
+  const nov=S.novedades.filter(n=>n.estado==="abierta").length;
+  return `<div class="row" style="margin-bottom:14px">${me.role==="jefe"?`<button class="btn big" onclick="newOT()">＋ Cargar orden de trabajo</button>`:""}${me.role==="mecanico"?`<button class="btn big" onclick="newMO()">＋ Cargar planilla de mano de obra</button>`:""}</div>
+  <div class="kpis">
+    <div class="kpi"><b style="color:var(--crit)">${crit}</b><span>Alertas críticas</span></div>
+    <div class="kpi"><b style="color:var(--warn)">${A.length-crit}</b><span>Advertencias</span></div>
+    <div class="kpi"><b>${mine.length}</b><span>OT abiertas</span></div>
+    <div class="kpi"><b>${nov}</b><span>Novedades sin cerrar</span></div>
+    <div class="kpi"><b>${S.vehicles.filter(v=>v.activo).length}</b><span>Móviles activos</span></div>
+  </div>
+  <div class="card"><h2>Alertas principales</h2>${A.slice(0,6).map(alertHTML).join("")||'<div class="empty">Sin alertas ✔</div>'}${A.length>6?`<button class="btn sec sm" onclick="go('alertas')">Ver las ${A.length} alertas</button>`:""}</div>
+  <div class="card"><h2>Órdenes abiertas</h2>${otTable(mine.slice(0,8))}</div>`;
+};
+V.alertas=()=>{
+  const A=alertsForMe();
+  return `<div class="card"><h2>Alertas (${A.length})</h2><p class="mut">Vencimientos de service (aviso a ${S.cfg.kmAviso} km / ${S.cfg.diasAviso} días), OT sin cerrar (más de ${S.cfg.otDias} días), reparaciones detectadas sin OT y móviles sin checklist (más de ${S.cfg.checkDias} días).</p>${A.map(alertHTML).join("")||'<div class="empty">Sin alertas ✔</div>'}</div>`;
+};
+
+/* ----- OT ----- */
+function otTable(list){
+  if(!list.length)return '<div class="empty">No hay órdenes</div>';
+  return `<div class="tw"><table><tr><th>N°</th><th>Móvil</th><th>Tipo</th><th>Descripción</th><th>Alta</th><th>Estado</th><th></th></tr>${list.map(o=>{
+    const a=o.estado!=="Cerrada"?days(o.fechaAlta):null;
+    return `<tr><td><b>${o.num}</b></td><td>${esc(vname(o.vehId))}</td><td><span class="tag ${o.tipo==="Preventivo"?"prev":"corr"}">${o.tipo}</span></td><td>${esc(o.desc).slice(0,70)}</td><td>${fmtD(o.fechaAlta)}${a!==null&&a>S.cfg.otDias?` <span class="tag crit">${a} d</span>`:""}</td><td><span class="tag ${o.estado==="Cerrada"?"ok":o.estado==="En proceso"?"warn":""}">${o.estado}</span></td><td><button class="btn sm sec" onclick="openOT('${o.id}')">Abrir</button></td></tr>`}).join("")}</table></div>`;
+}
+let fOT={tipo:"",estado:"",veh:""};
+V.ots=()=>{
+  let l=S.ots.slice().sort((a,b)=>b.num.localeCompare(a.num));
+  if(fOT.tipo)l=l.filter(o=>o.tipo===fOT.tipo);
+  if(fOT.estado==="abiertas")l=l.filter(o=>o.estado!=="Cerrada");else if(fOT.estado)l=l.filter(o=>o.estado===fOT.estado);
+  if(fOT.veh)l=l.filter(o=>o.vehId===fOT.veh);
+  return `<div class="card"><div class="row"><h2 class="grow">Órdenes de trabajo</h2>${me.role==="jefe"?`<button class="btn big" onclick="newOT()">＋ Cargar orden de trabajo</button>`:""}</div>
+  <div class="row"><select onchange="fOT.tipo=this.value;render()" style="width:auto"><option value="">Todos los tipos</option><option ${fOT.tipo==="Preventivo"?"selected":""}>Preventivo</option><option ${fOT.tipo==="Correctivo"?"selected":""}>Correctivo</option></select>
+  <select onchange="fOT.estado=this.value;render()" style="width:auto"><option value="">Todos los estados</option><option value="abiertas" ${fOT.estado==="abiertas"?"selected":""}>Abiertas (sin cerrar)</option><option ${fOT.estado==="Cerrada"?"selected":""}>Cerrada</option></select>
+  <select onchange="fOT.veh=this.value;render()" style="width:auto"><option value="">Todos los móviles</option>${S.vehicles.map(v=>`<option value="${v.id}" ${fOT.veh===v.id?"selected":""}>${esc(v.code+" · "+v.plate)}</option>`).join("")}</select>
+  <button class="btn sec sm" onclick="csvOTs()">Exportar CSV</button></div>${otTable(l)}</div>`;
+};
+function vehOptions(sel){return S.vehicles.filter(v=>v.activo).map(v=>`<option value="${v.id}" ${sel===v.id?"selected":""}>${esc(v.code+" · "+v.plate+" — "+v.desc)}</option>`).join("")}
+function newOT(vehId,tipo,novId){
+  if(me.role!=="jefe")return;
+  vehId=vehId||(S.vehicles[0]&&S.vehicles[0].id);tipo=tipo||"Correctivo";
+  const nv=novId?S.novedades.find(n=>n.id===novId):null;
+  const mecs=S.users.filter(u=>u.role==="mecanico");
+  const body=`<form id="f"><div class="grid2"><div><label>Móvil</label><select name="veh" id="ov" onchange="refNov()">${vehOptions(vehId)}</select></div>
+  <div><label>Tipo de mantenimiento</label><select name="tipo"><option ${tipo==="Preventivo"?"selected":""}>Preventivo</option><option ${tipo==="Correctivo"?"selected":""}>Correctivo</option></select></div>
+  <div><label>Prioridad</label><select name="prio"><option>Normal</option><option>Alta</option><option>Urgente</option></select></div>
+  <div><label>Mecánico asignado</label><select name="asig"><option value="">Sin asignar</option>${mecs.map(m=>`<option value="${m.user}">${esc(m.name)}</option>`).join("")}</select></div>
+  <div><label>Fecha</label><input type="date" name="fecha" value="${today()}" required></div>
+  <div><label>Km al ingreso</label><input type="number" name="km" id="okm" min="0" required></div></div>
+  <label>Descripción del trabajo</label><textarea name="desc" required>${nv?esc(nv.item+(nv.obs?": "+nv.obs:"")):tipo==="Preventivo"?"Service preventivo según plan":""}</textarea>
+  <div id="novbox"></div>
+  <div class="row" style="margin-top:14px"><button class="btn">Crear orden</button></div></form>`;
+  openDlg("Nueva orden de trabajo",body);
+  window.refNov=()=>{const id=document.getElementById("ov").value;document.getElementById("okm").value=veh(id).km;
+    const ns=S.novedades.filter(n=>n.vehId===id&&n.estado==="abierta"&&!n.otId);
+    document.getElementById("novbox").innerHTML=ns.length?`<label>Vincular novedades de checklist detectadas</label>${ns.map(n=>`<label style="color:var(--ink)"><input type="checkbox" name="nov" value="${n.id}" style="width:auto" ${n.id===novId?"checked":""}> ${esc(n.item)} ${n.obs?"— "+esc(n.obs):""} <span class="mut">(${fmtD(n.fecha)})</span></label>`).join("")}`:""};
+  refNov();
+  document.getElementById("f").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);
+    const o={id:uid(),num:"OT-"+String(S.seq++).padStart(4,"0"),vehId:f.get("veh"),tipo:f.get("tipo"),prio:f.get("prio"),desc:f.get("desc").trim(),estado:"Abierta",fechaAlta:f.get("fecha"),fechaCierre:null,kmIngreso:+f.get("km"),kmCierre:null,asignado:f.get("asig"),creadoPor:me.user,mo:[],rep:[],hist:[],novs:f.getAll("nov"),trabajo:""};
+    o.hist.push({t:nowStr(),user:me.user,txt:"OT creada ("+o.tipo+")"});
+    S.ots.push(o);o.novs.forEach(id=>{const n=S.novedades.find(x=>x.id===id);if(n)n.otId=o.id});
+    const v=veh(o.vehId);if(o.kmIngreso>v.km)v.km=o.kmIngreso;
+    logEv("OT creada",`${o.num} ${o.tipo}: ${o.desc}`,o.vehId,o.id);closeDlg();render();openOT(o.id)};
+}
+function openOT(id){
+  const o=S.ots.find(x=>x.id===id),v=veh(o.vehId),closed=o.estado==="Cerrada";
+  const hs=o.mo.reduce((s,m)=>s+m.horas,0),cost=o.rep.reduce((s,r)=>s+r.cant*r.costo,0);
+  const asig=S.users.find(u=>u.user===o.asignado);
+  const canMO=!closed&&(me.role==="mecanico"||me.role==="jefe");
+  const body=`<div class="row"><span class="tag ${o.tipo==="Preventivo"?"prev":"corr"}">${o.tipo}</span><span class="tag ${closed?"ok":"warn"}">${o.estado}</span><span class="tag">Prioridad ${o.prio}</span></div>
+  <p><b>${esc(vname(o.vehId))}</b> — ${esc(v.desc)}<br>Alta ${fmtD(o.fechaAlta)} · Km ingreso ${o.kmIngreso}${closed?` · Cierre ${fmtD(o.fechaCierre)} · Km cierre ${o.kmCierre}`:""}<br>Asignado: ${asig?esc(asig.name):"sin asignar"}</p>
+  <p>${esc(o.desc)}</p>${o.novs.length?`<p class="mut">Novedades vinculadas: ${o.novs.map(i=>{const n=S.novedades.find(x=>x.id===i);return n?esc(n.item):""}).join(", ")}</p>`:""}
+  ${closed&&o.trabajo?`<p><b>Trabajo realizado:</b> ${esc(o.trabajo)}</p>`:""}
+  <h4>Mano de obra (${hs} hs)</h4>${o.mo.length?`<div class="tw"><table><tr><th>Fecha</th><th>Mecánico</th><th>Horas</th><th>Tarea</th></tr>${o.mo.map(m=>`<tr><td>${fmtD(m.fecha)}</td><td>${esc(m.nombre)}</td><td>${m.horas}</td><td>${esc(m.tarea)}</td></tr>`).join("")}</table></div>`:'<div class="mut">Sin planillas cargadas</div>'}
+  ${canMO?`<button class="btn sm" onclick="newMO('${o.id}')">＋ Cargar mano de obra</button>`:""}
+  <h4>Repuestos / insumos ($ ${cost.toLocaleString("es-AR")})</h4>${o.rep.length?`<div class="tw"><table><tr><th>Detalle</th><th>Cant.</th><th>Costo unit.</th></tr>${o.rep.map(r=>`<tr><td>${esc(r.desc)}</td><td>${r.cant}</td><td>${r.costo}</td></tr>`).join("")}</table></div>`:'<div class="mut">Sin repuestos</div>'}
+  ${canMO?`<button class="btn sm sec" onclick="newRep('${o.id}')">＋ Agregar repuesto</button>`:""}
+  <h4>Historial de la orden</h4><div class="tl">${o.hist.slice().reverse().map(h=>`<div><b>${esc(h.txt)}</b><br><small>${fmtT(h.t)} · ${esc(h.user)}</small></div>`).join("")}</div>
+  <div class="row noprint" style="margin-top:14px">${me.role==="jefe"&&!closed?`${o.estado==="Abierta"?`<button class="btn sec" onclick="setEstado('${o.id}','En proceso')">Pasar a En proceso</button>`:""}<button class="btn" onclick="closeOTForm('${o.id}')">Cerrar orden</button>`:""}<button class="btn sec" onclick="window.print()">Imprimir</button></div>`;
+  openDlg(`${o.num}`,body);
+}
+function setEstado(id,e){const o=S.ots.find(x=>x.id===id);o.estado=e;o.hist.push({t:nowStr(),user:me.user,txt:"Estado: "+e});logEv("Cambio de estado",`${o.num} → ${e}`,o.vehId,o.id);render();openOT(id)}
+function closeOTForm(id){
+  const o=S.ots.find(x=>x.id===id);
+  if(!o.mo.length){alert("Para cerrar la OT debe haber al menos una planilla de mano de obra cargada (trazabilidad).");return}
+  openDlg("Cerrar "+o.num,`<form id="f"><div class="grid2"><div><label>Fecha de cierre</label><input type="date" name="fecha" value="${today()}" required></div><div><label>Km al cierre</label><input type="number" name="km" value="${Math.max(veh(o.vehId).km,o.kmIngreso)}" min="${o.kmIngreso}" required></div></div>
+  <label>Trabajo realizado</label><textarea name="trab" required></textarea>${o.tipo==="Preventivo"?'<p class="mut">Al cerrar, se actualiza el último service del móvil y se recalcula el próximo vencimiento.</p>':""}
+  <button class="btn" style="margin-top:12px">Cerrar orden</button></form>`);
+  document.getElementById("f").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);
+    o.estado="Cerrada";o.fechaCierre=f.get("fecha");o.kmCierre=+f.get("km");o.trabajo=f.get("trab").trim();
+    o.hist.push({t:nowStr(),user:me.user,txt:"OT cerrada"});
+    const v=veh(o.vehId);if(o.kmCierre>v.km)v.km=o.kmCierre;
+    if(o.tipo==="Preventivo"){v.lastSvcKm=o.kmCierre;v.lastSvcFecha=o.fechaCierre}
+    S.novedades.forEach(n=>{if(n.otId===o.id){n.estado="cerrada";n.fechaCierre=o.fechaCierre}});
+    logEv("OT cerrada",`${o.num} ${o.tipo}`,o.vehId,o.id);closeDlg();render()};
+}
+function newMO(otId){
+  const open=S.ots.filter(o=>o.estado!=="Cerrada"&&(me.role==="jefe"||!o.asignado||o.asignado===me.user));
+  if(!open.length){alert("No hay órdenes abiertas para cargar mano de obra.");return}
+  const mecs=S.users.filter(u=>u.role==="mecanico");
+  openDlg("Planilla de mano de obra",`<form id="f"><label>Orden de trabajo</label><select name="ot">${open.map(o=>`<option value="${o.id}" ${o.id===otId?"selected":""}>${o.num} · ${esc(vname(o.vehId))} · ${o.tipo}</option>`).join("")}</select>
+  <div class="grid2"><div><label>Fecha</label><input type="date" name="fecha" value="${today()}" required></div><div><label>Horas trabajadas</label><input type="number" name="h" step="0.25" min="0.25" required></div></div>
+  ${me.role==="jefe"?`<label>Mecánico</label><select name="mec">${mecs.map(m=>`<option value="${m.user}">${esc(m.name)}</option>`).join("")}</select>`:""}
+  <label>Tarea realizada</label><textarea name="t" required></textarea><button class="btn" style="margin-top:12px">Guardar planilla</button></form>`);
+  document.getElementById("f").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);const o=S.ots.find(x=>x.id===f.get("ot"));
+    const mu=me.role==="jefe"?S.users.find(u=>u.user===f.get("mec")):me;
+    o.mo.push({fecha:f.get("fecha"),user:mu.user,nombre:mu.name,horas:+f.get("h"),tarea:f.get("t").trim(),cargo:me.user});
+    if(o.estado==="Abierta")o.estado="En proceso";
+    o.hist.push({t:nowStr(),user:me.user,txt:`Mano de obra: ${f.get("h")} hs (${mu.name})`});
+    logEv("Mano de obra",`${o.num}: ${f.get("h")} hs — ${f.get("t")}`,o.vehId,o.id);closeDlg();render()};
+}
+function newRep(id){
+  openDlg("Agregar repuesto",`<form id="f"><label>Detalle</label><input name="d" required><div class="grid2"><div><label>Cantidad</label><input type="number" name="c" value="1" min="1" required></div><div><label>Costo unitario ($)</label><input type="number" name="p" value="0" min="0" step="0.01" required></div></div><button class="btn" style="margin-top:12px">Agregar</button></form>`);
+  document.getElementById("f").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);const o=S.ots.find(x=>x.id===id);
+    o.rep.push({desc:f.get("d").trim(),cant:+f.get("c"),costo:+f.get("p")});o.hist.push({t:nowStr(),user:me.user,txt:"Repuesto: "+f.get("d")});
+    logEv("Repuesto",`${o.num}: ${f.get("d")} x${f.get("c")}`,o.vehId,o.id);closeDlg();render();openOT(id)};
+}
+V.mo=()=>{
+  const rows=[];S.ots.forEach(o=>o.mo.forEach(m=>rows.push({o,m})));
+  let l=me.role==="mecanico"?rows.filter(r=>r.m.user===me.user):rows;
+  l.sort((a,b)=>b.m.fecha.localeCompare(a.m.fecha));
+  const tot=l.reduce((s,r)=>s+r.m.horas,0);
+  return `<div class="card"><div class="row"><h2 class="grow">Planillas de mano de obra (${tot} hs)</h2><button class="btn big" onclick="newMO()">＋ Cargar planilla</button></div>
+  ${l.length?`<div class="tw"><table><tr><th>Fecha</th><th>OT</th><th>Móvil</th><th>Mecánico</th><th>Horas</th><th>Tarea</th></tr>${l.map(r=>`<tr><td>${fmtD(r.m.fecha)}</td><td><a href="#" onclick="openOT('${r.o.id}');return false">${r.o.num}</a></td><td>${esc(vname(r.o.vehId))}</td><td>${esc(r.m.nombre)}</td><td>${r.m.horas}</td><td>${esc(r.m.tarea)}</td></tr>`).join("")}</table></div>`:'<div class="empty">Sin planillas</div>'}</div>`;
+};
+
+/* ----- Checklists / novedades ----- */
+V.checklists=()=>{
+  const vs=new Set(myVehicles().map(v=>v.id));
+  const l=S.checklists.filter(k=>vs.has(k.vehId)).sort((a,b)=>b.fecha.localeCompare(a.fecha)||b.t.localeCompare(a.t));
+  return `<div class="card"><div class="row"><h2 class="grow">Checklists de móviles</h2><button class="btn big" onclick="newCheck()">＋ Cargar checklist</button></div>
+  ${l.length?`<div class="tw"><table><tr><th>Fecha</th><th>Móvil</th><th>Obra</th><th>Cargó</th><th>Km</th><th>Resultado</th><th></th></tr>${l.map(k=>{const bad=k.items.filter(i=>i.r==="mal").length;return `<tr><td>${fmtD(k.fecha)}</td><td>${esc(vname(k.vehId))}</td><td>${esc(k.obra||"—")}</td><td>${esc(k.nombre)}</td><td>${k.km}</td><td><span class="tag ${bad?"crit":"ok"}">${bad?bad+" con falla":"Todo OK"}</span></td><td><button class="btn sm sec" onclick="viewCheck('${k.id}')">Ver</button></td></tr>`}).join("")}</table></div>`:'<div class="empty">Aún no hay checklists</div>'}</div>`;
+};
+function newCheck(vehId){
+  const vs=myVehicles();if(!vs.length){alert("No hay móviles disponibles");return}
+  vehId=vehId||vs[0].id;
+  openDlg("Checklist de móvil",`<form id="f"><div class="grid2"><div><label>Móvil</label><select name="veh" id="cv" onchange="document.getElementById('ckm').value=veh(this.value).km">${vs.map(v=>`<option value="${v.id}" ${v.id===vehId?"selected":""}>${esc(v.code+" · "+v.plate+" — "+v.desc)}</option>`).join("")}</select></div>
+  <div><label>Fecha</label><input type="date" name="fecha" value="${today()}" required></div>
+  <div><label>Kilometraje actual</label><input type="number" id="ckm" name="km" value="${veh(vehId).km}" min="0" required></div></div>
+  <label>Controles (marcar Bien / Mal / N/A)</label>
+  ${ITEMS.map((it,i)=>`<div class="ck"><span>${it}</span><div class="opts"><label><input type="radio" name="r${i}" value="ok" checked> Bien</label><label><input type="radio" name="r${i}" value="mal"> Mal</label><label><input type="radio" name="r${i}" value="na"> N/A</label></div><input type="text" name="o${i}" placeholder="Observación (obligatoria si está Mal)"></div>`).join("")}
+  <label>Observaciones generales</label><textarea name="gen"></textarea><button class="btn big" style="margin-top:12px;width:100%">Guardar checklist</button></form>`);
+  document.getElementById("f").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);
+    const items=ITEMS.map((it,i)=>({n:it,r:f.get("r"+i),o:f.get("o"+i).trim()}));
+    const falta=items.find(i=>i.r==="mal"&&!i.o);if(falta){alert("Falta la observación en: "+falta.n);return}
+    const v=veh(f.get("veh"));
+    const k={id:uid(),t:nowStr(),vehId:v.id,fecha:f.get("fecha"),km:+f.get("km"),obra:me.obra||v.obra,user:me.user,nombre:me.name,items,gen:f.get("gen").trim()};
+    S.checklists.push(k);if(k.km>v.km)v.km=k.km;
+    let nn=0;items.filter(i=>i.r==="mal").forEach(i=>{
+      const dup=S.novedades.some(n=>n.vehId===v.id&&n.item===i.n&&n.estado==="abierta");
+      if(!dup){S.novedades.push({id:uid(),vehId:v.id,chkId:k.id,item:i.n,obs:i.o,fecha:k.fecha,estado:"abierta",otId:null});nn++}});
+    logEv("Checklist",`${vname(v.id)} — ${nn} novedades nuevas`,v.id);closeDlg();render();
+    if(nn)alert(nn+" falla(s) registradas. Se generó una alerta de reparación pendiente para el taller.")};
+}
+function viewCheck(id){
+  const k=S.checklists.find(x=>x.id===id);
+  openDlg("Checklist "+fmtD(k.fecha),`<p><b>${esc(vname(k.vehId))}</b> · ${k.km} km · ${esc(k.nombre)} · ${esc(k.obra||"")}</p><div class="tw"><table>${k.items.map(i=>`<tr><td>${esc(i.n)}</td><td><span class="tag ${i.r==="ok"?"ok":i.r==="mal"?"crit":""}">${i.r==="ok"?"Bien":i.r==="mal"?"Mal":"N/A"}</span></td><td>${esc(i.o)}</td></tr>`).join("")}</table></div>${k.gen?`<p>${esc(k.gen)}</p>`:""}`);
+}
+V.novedades=()=>{
+  const l=S.novedades.slice().sort((a,b)=>(a.estado===b.estado?0:a.estado==="abierta"?-1:1)||b.fecha.localeCompare(a.fecha));
+  return `<div class="card"><h2>Novedades detectadas en checklists</h2>${l.length?`<div class="tw"><table><tr><th>Fecha</th><th>Móvil</th><th>Falla</th><th>Estado</th><th>OT</th><th></th></tr>${l.map(n=>{const o=S.ots.find(x=>x.id===n.otId);return `<tr><td>${fmtD(n.fecha)}</td><td>${esc(vname(n.vehId))}</td><td>${esc(n.item)}<br><small class="mut">${esc(n.obs)}</small></td><td><span class="tag ${n.estado==="cerrada"?"ok":o?"warn":"crit"}">${n.estado==="cerrada"?"Reparada":o?"Con OT":"Sin OT"}</span></td><td>${o?`<a href="#" onclick="openOT('${o.id}');return false">${o.num}</a>`:"—"}</td><td>${n.estado==="abierta"&&!n.otId?`<button class="btn sm" onclick="newOT('${n.vehId}','Correctivo','${n.id}')">Generar OT</button>`:""}</td></tr>`}).join("")}</table></div>`:'<div class="empty">Sin novedades</div>'}</div>`;
+};
+
+/* ----- Móviles ----- */
+V.vehiculos=()=>{
+  const vs=myVehicles();
+  return `<div class="card"><div class="row"><h2 class="grow">Móviles</h2>${me.role==="jefe"?`<button class="btn" onclick="editVeh()">＋ Nuevo móvil</button>`:""}</div>
+  <div class="tw"><table><tr><th>Código</th><th>Patente</th><th>Descripción</th><th>Obra</th><th>Km</th><th>Próximo service</th><th></th></tr>${vs.map(v=>{const s=svcInfo(v);return `<tr><td><b>${esc(v.code)}</b></td><td>${esc(v.plate)}</td><td>${esc(v.desc)}</td><td>${esc(v.obra)}</td><td>${v.km}</td><td><span class="tag ${s.st}">${s.nextKm} km / ${fmtD(s.nextF)}</span><br><small class="mut">${s.restKm<=0?"vencido por km":s.restKm+" km"} · ${s.restD<=0?"vencido por fecha":s.restD+" días"}</small></td><td>${me.role==="jefe"?`<button class="btn sm sec" onclick="editVeh('${v.id}')">Editar</button> `:""}<button class="btn sm sec" onclick="trazaVeh('${v.id}')">Historia</button></td></tr>`}).join("")}</table></div></div>`;
+};
+function editVeh(id){
+  const v=id?veh(id):{code:"",plate:"",desc:"",obra:"",km:0,svcKm:10000,svcDias:180,lastSvcKm:0,lastSvcFecha:today(),activo:true};
+  openDlg(id?"Editar móvil":"Nuevo móvil",`<form id="f"><div class="grid2"><div><label>Código interno</label><input name="code" value="${esc(v.code)}" required></div><div><label>Patente</label><input name="plate" value="${esc(v.plate)}" required></div>
+  <div><label>Descripción</label><input name="desc" value="${esc(v.desc)}" required></div><div><label>Obra / destino</label><input name="obra" value="${esc(v.obra)}"></div>
+  <div><label>Km actual</label><input type="number" name="km" value="${v.km}" required></div><div><label>Service cada (km)</label><input type="number" name="svcKm" value="${v.svcKm}" required></div>
+  <div><label>Service cada (días)</label><input type="number" name="svcDias" value="${v.svcDias}" required></div><div><label>Km del último service</label><input type="number" name="lsk" value="${v.lastSvcKm}" required></div>
+  <div><label>Fecha del último service</label><input type="date" name="lsf" value="${v.lastSvcFecha}" required></div><div><label>Estado</label><select name="act"><option value="1" ${v.activo?"selected":""}>Activo</option><option value="0" ${!v.activo?"selected":""}>Baja</option></select></div></div>
+  <button class="btn" style="margin-top:12px">Guardar</button></form>`);
+  document.getElementById("f").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);
+    const n=id?v:{id:uid()};Object.assign(n,{code:f.get("code").trim(),plate:f.get("plate").trim().toUpperCase(),desc:f.get("desc").trim(),obra:f.get("obra").trim(),km:+f.get("km"),svcKm:+f.get("svcKm"),svcDias:+f.get("svcDias"),lastSvcKm:+f.get("lsk"),lastSvcFecha:f.get("lsf"),activo:f.get("act")==="1"});
+    if(!id)S.vehicles.push(n);logEv(id?"Móvil editado":"Móvil creado",n.code+" "+n.plate,n.id);closeDlg();render()};
+}
+
+/* ----- Estadísticas ----- */
+function statRows(){
+  return S.vehicles.map(v=>{
+    const os=S.ots.filter(o=>o.vehId===v.id);
+    const p=os.filter(o=>o.tipo==="Preventivo"),c=os.filter(o=>o.tipo==="Correctivo");
+    return {v,p:p.length,pc:p.filter(o=>o.estado==="Cerrada").length,c:c.length,cc:c.filter(o=>o.estado==="Cerrada").length,
+      hs:os.reduce((s,o)=>s+o.mo.reduce((a,m)=>a+m.horas,0),0),cost:os.reduce((s,o)=>s+o.rep.reduce((a,r)=>a+r.cant*r.costo,0),0),
+      nov:S.novedades.filter(n=>n.vehId===v.id&&n.estado==="abierta").length};
+  });
+}
+V.stats=()=>{
+  const R=statRows(),max=Math.max(1,...R.map(r=>r.p+r.c));
+  const P=R.reduce((s,r)=>s+r.p,0),C=R.reduce((s,r)=>s+r.c,0);
+  return `<div class="kpis"><div class="kpi"><b style="color:var(--prev)">${P}</b><span>Preventivos totales</span></div><div class="kpi"><b style="color:var(--corr)">${C}</b><span>Correctivos totales</span></div><div class="kpi"><b>${P+C?Math.round(P*100/(P+C)):0}%</b><span>Proporción preventivo</span></div><div class="kpi"><b>${R.reduce((s,r)=>s+r.hs,0)}</b><span>Horas de mano de obra</span></div></div>
+  <div class="card"><h2>Mantenimientos por móvil</h2><p class="mut"><span class="bar" style="background:var(--prev);width:14px"></span> Preventivos &nbsp; <span class="bar" style="background:var(--corr);width:14px"></span> Correctivos</p>
+  <div class="tw"><table><tr><th>Móvil</th><th>Gráfico</th><th>Preventivos (cerrados)</th><th>Correctivos (cerrados)</th><th>Horas MO</th><th>Repuestos $</th><th>Novedades abiertas</th></tr>${R.map(r=>`<tr><td><b>${esc(r.v.code)}</b><br><small class="mut">${esc(r.v.plate)}</small></td><td style="min-width:160px"><span class="bar" style="background:var(--prev);width:${r.p/max*100}%"></span><span class="bar" style="background:var(--corr);width:${r.c/max*100}%"></span></td><td>${r.p} (${r.pc})</td><td>${r.c} (${r.cc})</td><td>${r.hs}</td><td>${r.cost.toLocaleString("es-AR")}</td><td>${r.nov}</td></tr>`).join("")}</table></div>
+  <button class="btn sec sm" style="margin-top:10px" onclick="csvStats()">Exportar CSV</button></div>`;
+};
+
+/* ----- Trazabilidad ----- */
+let fT="";
+V.traza=()=>{
+  const l=S.log.filter(x=>!fT||x.vehId===fT).slice(0,300);
+  return `<div class="card"><div class="row"><h2 class="grow">Trazabilidad</h2><select style="width:auto" onchange="fT=this.value;render()"><option value="">Todos los móviles</option>${S.vehicles.map(v=>`<option value="${v.id}" ${fT===v.id?"selected":""}>${esc(v.code+" · "+v.plate)}</option>`).join("")}</select>${fT?`<button class="btn sm" onclick="trazaVeh('${fT}')">Historia completa del móvil</button>`:""}</div>
+  <p class="mut">Registro de cada acción: quién, cuándo y sobre qué móvil/OT. Se muestran los últimos 300 eventos.</p>
+  ${l.length?`<div class="tw"><table><tr><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Móvil</th><th>Detalle</th></tr>${l.map(x=>`<tr><td>${fmtT(x.t)}</td><td>${esc(x.user)} <small class="mut">(${x.rol})</small></td><td>${esc(x.accion)}</td><td>${x.vehId?esc(vname(x.vehId)):"—"}</td><td>${esc(x.detalle)}</td></tr>`).join("")}</table></div>`:'<div class="empty">Sin eventos</div>'}</div>`;
+};
+function trazaVeh(id){
+  const v=veh(id),ev=[];
+  S.ots.filter(o=>o.vehId===id).forEach(o=>{ev.push({d:o.fechaAlta,txt:`${o.num} ${o.tipo} abierta — ${o.desc}`,k:o.tipo});if(o.fechaCierre)ev.push({d:o.fechaCierre,txt:`${o.num} ${o.tipo} CERRADA a ${o.kmCierre} km — ${o.trabajo}`,k:o.tipo})});
+  S.checklists.filter(k=>k.vehId===id).forEach(k=>{const b=k.items.filter(i=>i.r==="mal").length;ev.push({d:k.fecha,txt:`Checklist (${k.nombre}) a ${k.km} km — ${b?b+" fallas":"todo OK"}`,k:"Checklist"})});
+  ev.sort((a,b)=>b.d.localeCompare(a.d));
+  openDlg("Historia de "+v.code+" · "+v.plate,`<p>${esc(v.desc)} · ${v.km} km</p><div class="tl">${ev.map(e=>`<div><b>${fmtD(e.d)}</b> <span class="tag ${e.k==="Preventivo"?"prev":e.k==="Correctivo"?"corr":""}">${e.k}</span><br>${esc(e.txt)}</div>`).join("")||'<div class="mut">Sin historial</div>'}</div>`);
+}
+
+/* ----- Administración ----- */
+V.admin=()=>`<div class="card"><div class="row"><h2 class="grow">Usuarios</h2><button class="btn" onclick="editUser()">＋ Nuevo usuario</button></div>
+  <div class="tw"><table><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Obra</th><th></th></tr>${S.users.map(u=>`<tr><td>${esc(u.user)}</td><td>${esc(u.name)}</td><td>${ROLE_NAME[u.role]}</td><td>${esc(u.obra||"—")}</td><td><button class="btn sm sec" onclick="editUser('${u.user}')">Editar</button></td></tr>`).join("")}</table></div></div>
+  <div class="card"><h2>Parámetros de alertas</h2><form id="cf" class="grid2"><div><label>Avisar service cuando falten (km)</label><input type="number" name="kmAviso" value="${S.cfg.kmAviso}"></div><div><label>Avisar service cuando falten (días)</label><input type="number" name="diasAviso" value="${S.cfg.diasAviso}"></div>
+  <div><label>OT sin cerrar a partir de (días)</label><input type="number" name="otDias" value="${S.cfg.otDias}"></div><div><label>Checklist faltante a partir de (días)</label><input type="number" name="checkDias" value="${S.cfg.checkDias}"></div>
+  <div><label>Falla sin OT crítica a partir de (días)</label><input type="number" name="novDias" value="${S.cfg.novDias}"></div><div></div><div><button class="btn" style="margin-top:12px">Guardar parámetros</button></div></form></div>
+  <div class="card"><h2>Copia de seguridad</h2><p class="mut">Los datos se guardan en este navegador. Exportá una copia periódicamente o usala para pasar los datos a otra PC/celular.</p>
+  <div class="row"><button class="btn" onclick="exportJSON()">Descargar copia (JSON)</button><label class="btn sec" style="margin:0">Importar copia<input type="file" accept=".json" hidden onchange="importJSON(this.files[0])"></label><button class="btn danger" onclick="resetAll()">Borrar todo y reiniciar</button></div></div>`;
+afterRender.admin=()=>{document.getElementById("cf").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);for(const k in DEF_CFG)S.cfg[k]=+f.get(k);logEv("Configuración","Parámetros de alertas modificados");alert("Guardado");render()}};
+function editUser(u){
+  const x=u?S.users.find(y=>y.user===u):{user:"",name:"",role:"mecanico",obra:""};
+  openDlg(u?"Editar usuario":"Nuevo usuario",`<form id="f"><div class="grid2"><div><label>Usuario</label><input name="user" value="${esc(x.user)}" ${u?"readonly":""} required></div><div><label>Nombre</label><input name="name" value="${esc(x.name)}" required></div>
+  <div><label>Rol</label><select name="role"><option value="jefe" ${x.role==="jefe"?"selected":""}>Jefe de Taller</option><option value="mecanico" ${x.role==="mecanico"?"selected":""}>Mecánico</option><option value="obra" ${x.role==="obra"?"selected":""}>Obra</option></select></div>
+  <div><label>Obra (solo rol Obra)</label><input name="obra" value="${esc(x.obra||"")}"></div><div><label>PIN ${u?"(vacío = no cambiar)":""}</label><input name="pin" type="password" ${u?"":"required"}></div></div>
+  <div class="row" style="margin-top:12px"><button class="btn">Guardar</button>${u&&u!==me.user?`<button type="button" class="btn danger" onclick="delUser('${u}')">Eliminar</button>`:""}</div></form>`);
+  document.getElementById("f").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);
+    const un=f.get("user").trim().toLowerCase();
+    if(!u&&S.users.some(y=>y.user===un)){alert("Ese usuario ya existe");return}
+    if(u===me.user&&f.get("role")!=="jefe"){alert("No podés quitarte el rol de jefe");return}
+    const n=u?x:{user:un};Object.assign(n,{name:f.get("name").trim(),role:f.get("role"),obra:f.get("obra").trim()});
+    if(f.get("pin"))n.pin=hash(f.get("pin"));if(!u)S.users.push(n);
+    logEv(u?"Usuario editado":"Usuario creado",un);closeDlg();render()};
+}
+function delUser(u){if(confirm("¿Eliminar el usuario "+u+"?")){S.users=S.users.filter(x=>x.user!==u);logEv("Usuario eliminado",u);closeDlg();render()}}
+
+/* ============ Utilidades ============ */
+function openDlg(t,h){document.getElementById("dt").textContent=t;document.getElementById("dbody").innerHTML=h;const d=document.getElementById("dlg");if(!d.open)d.showModal()}
+function closeDlg(){const d=document.getElementById("dlg");if(d.open)d.close()}
+function download(name,txt,type){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([txt],{type}));a.download=name;a.click()}
+function csv(rows){return "﻿"+rows.map(r=>r.map(c=>'"'+String(c??"").replace(/"/g,'""')+'"').join(";")).join("\r\n")}
+function csvOTs(){download("ordenes_trabajo.csv",csv([["N°","Móvil","Tipo","Prioridad","Estado","Alta","Cierre","Km ingreso","Km cierre","Horas MO","Repuestos $","Descripción","Trabajo realizado"],...S.ots.map(o=>[o.num,vname(o.vehId),o.tipo,o.prio,o.estado,o.fechaAlta,o.fechaCierre,o.kmIngreso,o.kmCierre,o.mo.reduce((s,m)=>s+m.horas,0),o.rep.reduce((s,r)=>s+r.cant*r.costo,0),o.desc,o.trabajo])]),"text/csv")}
+function csvStats(){download("estadisticas_moviles.csv",csv([["Móvil","Patente","Preventivos","Prev. cerrados","Correctivos","Corr. cerrados","Horas MO","Repuestos $","Novedades abiertas"],...statRows().map(r=>[r.v.code,r.v.plate,r.p,r.pc,r.c,r.cc,r.hs,r.cost,r.nov])]),"text/csv")}
+function exportJSON(){download("mantenimiento_backup_"+today()+".json",JSON.stringify(S,null,1),"application/json")}
+function importJSON(f){if(!f)return;const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!d.vehicles||!d.users)throw 0;if(!confirm("Esto reemplaza todos los datos actuales. ¿Continuar?"))return;S=d;save();alert("Datos importados. Volvé a ingresar.");logout()}catch(e){alert("Archivo inválido")}};r.readAsText(f)}
+function resetAll(){if(confirm("Se borrarán TODOS los datos de este navegador. ¿Seguro?")&&confirm("Última confirmación: borrar todo.")){localStorage.removeItem(KEY);sessionStorage.clear();location.reload()}}
+document.getElementById("dlg").addEventListener("click",e=>{if(e.target.id==="dlg")closeDlg()});
+boot();
+</script>
+</body>
+</html>
