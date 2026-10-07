@@ -209,6 +209,7 @@ function loginView(msg){
   <label>${c?"Clave":"PIN"}</label><input name="p" type="password" autocomplete="current-password" required>
   <p id="le" style="color:var(--crit);min-height:20px">${esc(msg||"")}</p>
   <button class="btn big" style="width:100%">Ingresar</button></form>
+  <p style="text-align:center;margin:12px 0 0"><a href="guia.html" target="_blank">Guía rápida de uso</a></p>
   ${c?'<p class="mut" style="font-size:12px;margin-top:14px">Datos compartidos en la nube. Si no tenés usuario, pedíselo al jefe de taller.</p>':'<p class="mut" style="font-size:12px;margin-top:14px">Modo local (sin nube). Usuarios iniciales: <b>jefe</b>, <b>mecanico</b>, <b>administrativo</b>, <b>obra</b> — PIN <b>1234</b>. Cambialos desde Administración.</p>'}</div>`;
   document.getElementById("lf").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);
     const un=f.get("u").trim().toLowerCase();
@@ -285,7 +286,7 @@ function render(){
   const nav=NAV[me.role];
   const nA=alertsForMe().length;
   document.getElementById("app").innerHTML=`
-  <header><h1>🔧 Mantenimiento de Flota</h1><span class="who">${esc(me.name)} · ${ROLE_NAME[me.role]}${me.obra?" · "+esc(me.obra):""}</span><button class="btn sec sm" onclick="logout()">Salir</button></header>
+  <header><h1>🔧 Mantenimiento de Flota</h1><span class="who">${esc(me.name)} · ${ROLE_NAME[me.role]}${me.obra?" · "+esc(me.obra):""}</span><a class="btn sec sm" href="guia.html" target="_blank">Guía</a><button class="btn sec sm" onclick="logout()">Salir</button></header>
   <nav>${nav.map(([k,l])=>`<button class="${k===view?"on":""}" onclick="go('${k}')">${l}${k==="alertas"&&nA?` <span class="tag crit">${nA}</span>`:""}</button>`).join("")}</nav>
   <main id="main"></main>`;
   const f=V[view]||V.panel;
@@ -482,10 +483,11 @@ V.novedades=()=>{
 /* ----- Móviles ----- */
 V.vehiculos=()=>{
   const vs=myVehicles();
-  return `<div class="card"><div class="row"><h2 class="grow">Móviles</h2>${me.role==="jefe"?`<button class="btn" onclick="editVeh()">＋ Nuevo móvil</button>`:""}</div>
-  <div class="tw"><table><tr><th>Código</th><th>Patente</th><th>Descripción</th><th>Obra</th><th>Km</th><th>Próximo mantenimiento</th><th></th></tr>${vs.map(v=>{const pi=planInfo(v),nx=pi.slice().sort((a,b)=>a.rest-b.rest)[0];return `<tr><td><b>${esc(v.code)}</b></td><td>${esc(v.plate)}</td><td>${esc(v.desc)}</td><td>${esc(v.obra)}</td><td>${nk(v.km)}</td><td>${nx?`<span class="tag ${nx.st}">${nk(nx.next)} km · ${esc(nx.it.t)}</span><br><small class="mut">${nx.rest<=0?"vencido hace "+nk(-nx.rest)+" km":"faltan "+nk(nx.rest)+" km (~"+nx.dias+" días)"}</small>`:"—"}</td><td>${me.role==="jefe"?`<button class="btn sm sec" onclick="editVeh('${v.id}')">Editar</button> `:""}<button class="btn sm sec" onclick="trazaVeh('${v.id}')">Historia</button></td></tr>`}).join("")}</table></div></div>`;
+  return `<div class="card"><div class="row"><h2 class="grow">Móviles</h2>${me.role==="administrativo"?`<button class="btn" onclick="editVeh()">＋ Nuevo móvil</button>`:""}</div>
+  <div class="tw"><table><tr><th>Código</th><th>Patente</th><th>Descripción</th><th>Obra</th><th>Km</th><th>Próximo mantenimiento</th><th></th></tr>${vs.map(v=>{const pi=planInfo(v),nx=pi.slice().sort((a,b)=>a.rest-b.rest)[0];return `<tr><td><b>${esc(v.code)}</b></td><td>${esc(v.plate)}</td><td>${esc(v.desc)}</td><td>${esc(v.obra)}</td><td>${nk(v.km)}</td><td>${nx?`<span class="tag ${nx.st}">${nk(nx.next)} km · ${esc(nx.it.t)}</span><br><small class="mut">${nx.rest<=0?"vencido hace "+nk(-nx.rest)+" km":"faltan "+nk(nx.rest)+" km (~"+nx.dias+" días)"}</small>`:"—"}</td><td>${me.role==="administrativo"?`<button class="btn sm sec" onclick="editVeh('${v.id}')">Editar</button> `:""}<button class="btn sm sec" onclick="trazaVeh('${v.id}')">Historia</button></td></tr>`}).join("")}</table></div></div>`;
 };
 function editVeh(id){
+  if(me.role!=="administrativo")return;
   const v=id?veh(id):{code:"",plate:"",desc:"",obra:"",km:0,kmDia:60,done:{},activo:true};
   openDlg(id?"Editar móvil":"Nuevo móvil",`<form id="f"><div class="grid2"><div><label>Código interno</label><input name="code" value="${esc(v.code)}" required></div><div><label>Patente</label><input name="plate" value="${esc(v.plate)}" required></div>
   <div><label>Descripción</label><input name="desc" value="${esc(v.desc)}" required></div><div><label>Obra / destino</label><input name="obra" value="${esc(v.obra)}"></div>

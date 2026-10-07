@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Guía rápida - Mantenimiento de Flota</title>
+<style>
+:root{--ink:#1c2430;--mut:#667085;--line:#e2e6ec;--pri:#1f5fbf;--bg:#f3f5f8}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.5 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+main{max-width:820px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:26px;margin:0 0 4px}
+h2{font-size:19px;margin:0 0 10px;color:var(--pri)}
+h3{font-size:16px;margin:14px 0 4px}
+.sub{color:var(--mut);margin:0 0 18px}
+section{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:14px;break-inside:avoid}
+ol,ul{margin:6px 0 6px 20px;padding:0}li{margin:3px 0}
+.url{background:#e7effb;border-radius:8px;padding:10px 14px;font-weight:600;word-break:break-all}
+.tag{display:inline-block;padding:1px 9px;border-radius:99px;font-size:13px;font-weight:600;background:#eef1f5}
+.crit{background:#fbe3e3;color:#c62828}.warn{background:#fdf0d9;color:#c77700}.ok{background:#e1f4e8;color:#1a8a4a}
+table{width:100%;border-collapse:collapse;font-size:15px}th,td{text-align:left;padding:6px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--mut);font-size:12px;text-transform:uppercase}
+.btn{display:inline-block;background:var(--pri);color:#fff;padding:7px 14px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;border:0;cursor:pointer}
+@media print{body{background:#fff}.noprint{display:none}section{border-color:#ccc}}
+</style>
+</head>
+<body>
+<main>
+<h1>🔧 Mantenimiento de Flota</h1>
+<p class="sub">Guía rápida para el taller, los mecánicos, la obra y administración</p>
+<p class="noprint"><button class="btn" onclick="window.print()">Imprimir / guardar en PDF</button></p>
+
+<section>
+<h2>1. Cómo entrar</h2>
+<div class="url">https://tauxsilvana-svg.github.io/mantenimiento-flota/</div>
+<ol>
+<li>Abrí el enlace desde el celular o la computadora (sirve Chrome o Edge).</li>
+<li>Escribí tu <b>usuario</b> (por ejemplo <b>juan.perez</b>) y tu <b>clave</b>.</li>
+<li>Tocá <b>Ingresar</b>. Para salir, tocá <b>Salir</b> arriba a la derecha.</li>
+</ol>
+<p>Tip: en el celular, agregá la página a la pantalla de inicio desde el menú del navegador para abrirla como una app.</p>
+<p>Si olvidaste tu clave o el sistema no te deja entrar, pedíselo al Jefe de Taller.</p>
+</section>
+
+<section>
+<h2>2. Quién puede hacer qué</h2>
+<table>
+<tr><th>Usuario</th><th>Qué hace</th></tr>
+<tr><td><b>Jefe de Taller</b></td><td>Maneja el taller: crea y cierra órdenes de trabajo, genera OT desde las alertas, ve estadísticas y trazabilidad, crea usuarios y ajusta el plan y las alertas. No carga móviles: eso lo hace Administración.</td></tr>
+<tr><td><b>Mecánico</b></td><td>Carga las planillas de mano de obra y los repuestos en las órdenes de trabajo.</td></tr>
+<tr><td><b>Obra</b></td><td>Carga los checklists de los móviles de su obra y ve sus alertas.</td></tr>
+<tr><td><b>Administrativo</b></td><td><b>Carga y edita los móviles</b> (altas, bajas, km y datos del plan). También mira alertas, órdenes y estadísticas.</td></tr>
+</table>
+</section>
+
+<section>
+<h2>3. Obra: cargar el checklist de un móvil</h2>
+<ol>
+<li>Tocá <b>Checklists → ＋ Cargar checklist</b>.</li>
+<li>Elegí el móvil, la fecha y el <b>kilometraje actual</b> (importante: de ahí salen los avisos de service).</li>
+<li>Marcá cada control: <b>Bien</b>, <b>Mal</b> o <b>N/A</b>.</li>
+<li>Si marcás <b>Mal</b>, escribí qué le pasa. Es obligatorio.</li>
+<li>Tocá <b>Guardar checklist</b>.</li>
+</ol>
+<p>Cada falla marcada "Mal" le llega al taller como una alerta de <b>reparación pendiente</b>. Repetilo según el plazo que fije el taller (por defecto, una vez por semana por móvil).</p>
+</section>
+
+<section>
+<h2>4. Jefe de Taller: orden de trabajo (OT)</h2>
+<h3>Crear una OT</h3>
+<ol>
+<li>Tocá el botón grande <b>＋ Cargar orden de trabajo</b> (en el Panel o en Órdenes de trabajo).</li>
+<li>Elegí el móvil y el tipo: <b>Preventivo</b> o <b>Correctivo</b>.</li>
+<li><b>Preventivo:</b> tildá los trabajos del plan a realizar. Ya vienen marcados los que están vencidos o por vencer.</li>
+<li><b>Correctivo:</b> describí la reparación. Si el móvil tiene fallas de checklist sin atender, tildalas para vincularlas.</li>
+<li>Elegí el mecánico asignado, la prioridad y tocá <b>Crear orden</b>.</li>
+</ol>
+<h3>Cerrar una OT</h3>
+<ol>
+<li>Abrí la OT y tocá <b>Cerrar orden</b>.</li>
+<li>Completá fecha, <b>km al cierre</b> y el trabajo realizado.</li>
+</ol>
+<p>No se puede cerrar una OT sin al menos una planilla de mano de obra. Al cerrar un preventivo se recalcula el próximo vencimiento. Al cerrar un correctivo se dan por reparadas las fallas vinculadas.</p>
+<h3>Desde las alertas</h3>
+<p>En <b>Alertas</b>, el botón <b>Generar OT preventiva</b> o <b>Generar OT correctiva</b> abre la OT ya completada.</p>
+</section>
+
+<section>
+<h2>5. Mecánico: cargar mano de obra</h2>
+<ol>
+<li>Tocá <b>Mano de obra → ＋ Cargar planilla</b> (o abrí la OT y tocá <b>＋ Cargar mano de obra</b>).</li>
+<li>Elegí la OT, la fecha y las <b>horas trabajadas</b>.</li>
+<li>Describí la tarea realizada y tocá <b>Guardar planilla</b>.</li>
+<li>Si usaste repuestos: abrí la OT y tocá <b>＋ Agregar repuesto</b>.</li>
+</ol>
+<p>Cada día que trabajes en una OT, cargá una planilla. Las horas y las OT cerradas de cada mecánico quedan en las estadísticas.</p>
+</section>
+
+<section>
+<h2>6. Plan de mantenimiento preventivo</h2>
+<table>
+<tr><th>Cada</th><th>Trabajo</th></tr>
+<tr><td>5.000 km</td><td>Cambio de aceite y revisión general</td></tr>
+<tr><td>10.000 km</td><td>Frenos y neumáticos</td></tr>
+<tr><td>20.000 km</td><td>Batería y filtros</td></tr>
+<tr><td>50.000 km</td><td>Sistema de refrigeración</td></tr>
+<tr><td>100.000 km</td><td>Correa de distribución</td></tr>
+</table>
+<p>El sistema avisa <b>30 días antes</b> de cada vencimiento, calculando los días según lo que recorre cada móvil. El aviso lo ven el Jefe de Taller, Administración y la Obra del móvil, arriba de todas las pantallas y en <b>Alertas</b>.</p>
+</section>
+
+<section>
+<h2>7. Las alertas</h2>
+<ul>
+<li><span class="tag crit">Rojo</span> es urgente: mantenimiento vencido, OT sin cerrar a los 7 días o falla sin reparar hace más de 3 días.</li>
+<li><span class="tag warn">Naranja</span> es una advertencia: vencimiento próximo, OT sin iniciar o móvil sin checklist.</li>
+</ul>
+<p>Las alertas desaparecen solas cuando se resuelve el problema: se cierra la OT, se carga el checklist o se hace el service.</p>
+</section>
+
+<section>
+<h2>8. Estadísticas y trazabilidad (Jefe y Administrativo)</h2>
+<ul>
+<li><b>Estadísticas:</b> por móvil, cuántos mantenimientos preventivos y correctivos tuvo, con horas y repuestos. También cuántas OT cerró cada mecánico. Se pueden exportar a CSV (se abre en Excel).</li>
+<li><b>Trazabilidad:</b> registro de cada acción (quién, cuándo, sobre qué móvil u OT). En <b>Móviles → Historia</b> se ve la vida completa de cada móvil.</li>
+</ul>
+</section>
+
+<section>
+<h2>9. Administrativo: cargar y mantener los móviles</h2>
+<ol>
+<li>Tocá <b>Móviles → ＋ Nuevo móvil</b>.</li>
+<li>Completá código interno, patente, descripción y <b>obra</b> (escribila igual que en el usuario de la obra).</li>
+<li>Cargá el <b>km actual</b> y el km promedio por día.</li>
+<li>En el plan preventivo, poné el km al que se hizo cada trabajo la última vez (0 si nunca).</li>
+<li>Tocá <b>Guardar</b>. Para modificarlo o darlo de baja, usá <b>Editar</b> en la lista.</li>
+</ol>
+</section>
+
+<section>
+<h2>10. Administración (Jefe de Taller)</h2>
+<ul>
+<li><b>Alta rápida de mecánicos:</b> pegá los nombres, uno por línea, con una clave inicial. El usuario se arma con el nombre (ej. <b>juan.perez</b>).</li>
+<li><b>Nuevo usuario:</b> para administrativo y obra. En obra, el nombre de la obra debe ser igual al que figura en los móviles.</li>
+<li><b>Plan de mantenimiento:</b> se pueden cambiar los km y los trabajos, o agregar nuevos.</li>
+<li><b>Parámetros de alertas:</b> días de aviso previo, días para marcar una OT sin cerrar, etc.</li>
+<li>Cada usuario cambia su propia clave desde <b>Editar</b> (mínimo 6 caracteres).</li>
+</ul>
+</section>
+
+<section>
+<h2>11. Consejos</h2>
+<ul>
+<li>Cargá siempre el <b>kilometraje real</b>. Si está desactualizado, los avisos salen tarde.</li>
+<li>Una orden por trabajo, y cerrala apenas termine. Una OT abierta sin cerrar genera alertas.</li>
+<li>Si el celular no tiene señal, la página no guarda. Esperá a tener conexión antes de cargar.</li>
+<li>Una vez al mes, el Jefe puede bajar una copia: <b>Administración → Descargar copia (JSON)</b>.</li>
+</ul>
+</section>
+</main>
+</body>
+</html>
